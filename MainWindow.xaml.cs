@@ -10,7 +10,7 @@ namespace YGODuelSimulator
     /// <summary>
     /// Interaction logic for MainWindow.xaml
     /// </summary>
-    public partial class MainWindow : Window
+    public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         private readonly CardImportService _importService = new();
         private readonly CardImageService _imageService = new();
@@ -18,15 +18,26 @@ namespace YGODuelSimulator
         public MainWindow()
         {
             InitializeComponent();
+
+            // Keep the window's theme (and the Mica backdrop) in sync with the OS
+            // light/dark setting.
+            Wpf.Ui.Appearance.SystemThemeWatcher.Watch(this);
+
             Loaded += MainWindow_Loaded;
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            // First run: if there's no database yet, unpack the bundled seed so the
+            // user starts with every card without hitting the YGOPRODeck API.
+            var seeded = DatabaseSeeder.EnsureSeeded();
+
             // Make sure the database and schema exist, then show the current count.
             await using var db = new AppDbContext();
             await db.Database.MigrateAsync();
             await RefreshCountAsync();
+
+            if (seeded) StatusText.Text = "Loaded the bundled card database.";
         }
 
         private async void ImportButton_Click(object sender, RoutedEventArgs e)
@@ -48,6 +59,27 @@ namespace YGODuelSimulator
             finally
             {
                 ImportButton.IsEnabled = true;
+            }
+        }
+
+        private async void ExportSeedButton_Click(object sender, RoutedEventArgs e)
+        {
+            ExportSeedButton.IsEnabled = false;
+            StatusText.Text = "Exporting database seed…";
+            try
+            {
+                await DatabaseSeeder.ExportSeedAsync();
+                var seed = DatabaseSeeder.GetSeedPath();
+                var sizeMb = new System.IO.FileInfo(seed).Length / 1024d / 1024d;
+                StatusText.Text = $"Wrote {seed} ({sizeMb:N1} MB). Commit it as the bundled seed.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Export failed: {ex.Message}";
+            }
+            finally
+            {
+                ExportSeedButton.IsEnabled = true;
             }
         }
 

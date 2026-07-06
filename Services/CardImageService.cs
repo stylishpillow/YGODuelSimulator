@@ -20,6 +20,13 @@ public class CardImageService
     // Cap how many images download at once so we never hammer the image server.
     private static readonly SemaphoreSlim DownloadConcurrency = new(4);
 
+    // The API guide blacklists IPs that pull a high volume of images per second,
+    // so on top of the concurrency cap we space out the start of each network
+    // fetch. ~100ms spacing keeps us to at most ~10 downloads/sec.
+    private static readonly TimeSpan MinFetchSpacing = TimeSpan.FromMilliseconds(100);
+    private static readonly SemaphoreSlim RateGate = new(1, 1);
+    private static DateTime _nextAllowedFetchUtc = DateTime.MinValue;
+
     // Prevents two callers from downloading the same file simultaneously.
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> FileLocks = new();
 
@@ -62,6 +69,7 @@ public class CardImageService
             await DownloadConcurrency.WaitAsync(cancellationToken);
             try
             {
+                await ThrottleAsync(cancellationToken);
                 bytes = await Http.GetByteArrayAsync(sourceUrl, cancellationToken);
             }
             finally
@@ -80,6 +88,23 @@ public class CardImageService
         {
             gate.Release();
             FileLocks.TryRemove(path, out _);
+        }
+    }
+
+    /// <summary>Delays until the next fetch is allowed, keeping a minimum spacing
+    /// between the start of successive downloads.</summary>
+    private static async Task ThrottleAsync(CancellationToken cancellationToken)
+    {
+        await RateGate.WaitAsync(cancellationToken);
+        try
+        {
+            var wait = _nextAllowedFetchUtc - DateTime.UtcNow;
+            if (wait > TimeSpan.Zero) await Task.Delay(wait, cancellationToken);
+            _nextAllowedFetchUtc = DateTime.UtcNow + MinFetchSpacing;
+        }
+        finally
+        {
+            RateGate.Release();
         }
     }
 

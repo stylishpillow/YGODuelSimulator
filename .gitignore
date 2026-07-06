@@ -362,10 +362,13 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-# Local SQLite card database (regenerated via the in-app Import button)
+# Local SQLite card database (regenerated via the in-app Import button, or
+# unpacked from the committed cards.db.gz seed on first run)
 cards.db
 cards.db-shm
 cards.db-wal
+# ...but DO commit the compressed seed so users get every card out of the box.
+!cards.db.gz
 
 # Lazily-downloaded card image cache
 images/
