@@ -4,11 +4,90 @@
       xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:controls="clr-namespace:YGODuelSimulator.Views.Controls"
       mc:Ignorable="d"
       Title="Deck Constructor">
-    <StackPanel Margin="16" VerticalAlignment="Center" HorizontalAlignment="Center">
-        <ui:SymbolIcon Symbol="Layer24" FontSize="48" HorizontalAlignment="Center"/>
-        <TextBlock Text="Deck Constructor" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-        <TextBlock Text="Coming soon — build and save decks here." Opacity="0.7" HorizontalAlignment="Center"/>
-    </StackPanel>
+    <Page.Resources>
+        <!-- A single card in a deck zone: image + a copy-count badge. Left-click
+             removes one copy; right-click opens the slot context menu. -->
+        <DataTemplate x:Key="DeckSlotTemplate">
+            <Grid Width="72" Margin="3" Cursor="Hand" Background="Transparent"
+                  ToolTip="{Binding Card.Name}" MouseLeftButtonUp="Slot_LeftClick">
+                <Image Source="{Binding Image}" Stretch="Uniform" Height="105"/>
+                <Border VerticalAlignment="Bottom" HorizontalAlignment="Right"
+                        Background="#CC000000" CornerRadius="4" Padding="4,0" Margin="2"
+                        Visibility="{Binding CountBadgeVisibility}">
+                    <TextBlock Text="{Binding CountLabel}" Foreground="White" FontSize="11"/>
+                </Border>
+                <Grid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Remove one" Click="RemoveOne_Click"/>
+                        <MenuItem Header="Remove all" Click="RemoveAll_Click"/>
+                        <MenuItem Header="Move to Side" Click="MoveToSide_Click"/>
+                    </ContextMenu>
+                </Grid.ContextMenu>
+            </Grid>
+        </DataTemplate>
+    </Page.Resources>
+
+    <Grid Margin="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="340"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Left: reusable card browser -->
+        <controls:CardBrowser x:Name="Browser" Grid.Column="0"
+                              CardActivated="Browser_CardActivated"/>
+
+        <!-- Right: the deck -->
+        <Grid Grid.Column="1" Margin="16,0,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                <TextBlock Text="Deck:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ui:TextBox x:Name="DeckNameBox" Width="180" PlaceholderText="Untitled"/>
+                <ComboBox x:Name="DeckPicker" Width="150" Margin="8,0,0,0"/>
+                <ui:Button Content="Open" Margin="8,0,0,0" Click="Open_Click"/>
+                <ui:Button Content="Save" Margin="8,0,0,0" Appearance="Primary" Click="Save_Click"/>
+                <ui:Button Content="Delete" Margin="8,0,0,0" Click="Delete_Click"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+                <ui:Button Content="New" Click="New_Click"/>
+                <ui:Button Content="Import .ydk" Margin="8,0,0,0" Click="Import_Click"/>
+                <ui:Button Content="Export .ydk" Margin="8,0,0,0" Click="Export_Click"/>
+                <TextBlock x:Name="StatusText" VerticalAlignment="Center" Margin="16,0,0,0" Opacity="0.7"/>
+            </StackPanel>
+
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock x:Name="MainHeader" FontWeight="SemiBold" Margin="0,4"/>
+                    <ItemsControl x:Name="MainList" ItemTemplate="{StaticResource DeckSlotTemplate}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+
+                    <TextBlock x:Name="ExtraHeader" FontWeight="SemiBold" Margin="0,10,0,4"/>
+                    <ItemsControl x:Name="ExtraList" ItemTemplate="{StaticResource DeckSlotTemplate}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+
+                    <TextBlock x:Name="SideHeader" FontWeight="SemiBold" Margin="0,10,0,4"/>
+                    <ItemsControl x:Name="SideList" ItemTemplate="{StaticResource DeckSlotTemplate}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
 </Page>
