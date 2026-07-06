@@ -6,7 +6,28 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+
+    <!-- Product identity + version (drives the release/installer version). -->
+    <Product>YGO Duel Simulator</Product>
+    <Authors>Eelco Hansma</Authors>
+    <Version>0.1.0</Version>
+
+    <!-- Self-contained publishes target 64-bit Windows and embed the native
+         SQLite library so a single folder runs with no .NET runtime installed. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+
+    <!-- Use our own Program.Main (Velopack needs to run before WPF starts) instead
+         of the entry point WPF would generate from App.xaml. -->
+    <StartupObject>YGODuelSimulator.Program</StartupObject>
   </PropertyGroup>
+
+  <!-- Demote App.xaml from ApplicationDefinition (which would emit a second Main)
+       to a compiled Page, so only Program.Main remains as the entry point. -->
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" SubType="Designer" Generator="MSBuild:Compile" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Bundled card database seed: unpacked on first run so users get every
@@ -23,6 +44,7 @@
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.7" />
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.11" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
