@@ -115,7 +115,7 @@ namespace YGODuelSimulator.Views.Pages
 
                     var path = await _imageService.GetImagePathAsync(
                         image.ApiImageId, image.ImageUrl, CardImageSize.Full);
-                    CardImage.Source = LoadFrozenBitmap(path);
+                    CardImage.Source = ImageLoading.LoadFrozen(path);
 
                     CardDetailsText.Text = BuildDetails(card) +
                         (cached ? "\n\n(image loaded from local cache)"
@@ -145,19 +145,6 @@ namespace YGODuelSimulator.Views.Pages
             lines.Add("");
             lines.Add(card.Description ?? string.Empty);
             return string.Join("\n", lines);
-        }
-
-        /// <summary>Loads an image fully into memory and freezes it so the file
-        /// isn't locked and the bitmap can be used across threads.</summary>
-        private static BitmapImage LoadFrozenBitmap(string path)
-        {
-            var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.UriSource = new Uri(path);
-            bmp.EndInit();
-            bmp.Freeze();
-            return bmp;
         }
 
         private async Task RefreshCountAsync()
