@@ -11,7 +11,7 @@
         <!-- A card in play: front image (rotated for defense) or a face-down back,
              draggable, with a right-click action menu and left-click to inspect. -->
         <DataTemplate x:Key="BoardCardTemplate">
-            <Grid Width="72" Height="105" Cursor="Hand" Background="Transparent"
+            <Grid Width="82" Height="120" Cursor="Hand" Background="Transparent"
                   ToolTip="{Binding Name}" RenderTransformOrigin="0.5,0.5"
                   PreviewMouseLeftButtonDown="Card_PreviewMouseLeftButtonDown"
                   MouseMove="Card_MouseMove"
@@ -48,22 +48,26 @@
 
         <!-- A single-card zone: a drop target that shows its card (if any). -->
         <DataTemplate x:Key="ZoneTemplate">
-            <Border Width="78" Height="111" Margin="3" AllowDrop="True" Drop="Zone_Drop"
+            <Border Width="88" Height="126" Margin="4" AllowDrop="True" Drop="Zone_Drop"
                     Background="#18FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
-                    CornerRadius="4">
+                    CornerRadius="5">
                 <ContentControl Content="{Binding Card}"
                                 ContentTemplate="{StaticResource BoardCardTemplate}"
                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
         </DataTemplate>
 
-        <Style x:Key="ZoneRow" TargetType="ItemsControl">
-            <Setter Property="ItemTemplate" Value="{StaticResource ZoneTemplate}"/>
-            <Setter Property="ItemsPanel">
-                <Setter.Value>
-                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
-                </Setter.Value>
-            </Setter>
+        <!-- A pile (Deck / Extra / GY / Banished): drop target + click to view. -->
+        <Style x:Key="PileBorder" TargetType="Border">
+            <Setter Property="Width" Value="88"/>
+            <Setter Property="Height" Value="126"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="AllowDrop" Value="True"/>
+            <Setter Property="Background" Value="#22FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#40FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="5"/>
         </Style>
     </Page.Resources>
 
@@ -110,68 +114,84 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Auto">
-                    <StackPanel HorizontalAlignment="Center">
-                        <!-- Extra Monster Zones + Extra Deck -->
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
-                            <Border Width="78" Height="111" Margin="3" Tag="extra" Cursor="Hand"
-                                    AllowDrop="True" Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click"
-                                    Background="#22FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
-                                    CornerRadius="4">
-                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                    <TextBlock Text="Extra" HorizontalAlignment="Center" FontSize="11"/>
-                                    <TextBlock Text="{Binding ExtraDeck.Count}" HorizontalAlignment="Center" FontSize="18"/>
-                                </StackPanel>
-                            </Border>
-                            <ItemsControl ItemsSource="{Binding ExtraMonsterZones}" Style="{StaticResource ZoneRow}"/>
-                        </StackPanel>
+                <!-- Field, centered in the available area -->
+                <Viewbox Grid.Row="0" Stretch="Uniform" StretchDirection="DownOnly" Margin="0,0,0,8">
+                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
 
-                        <!-- Graveyard + Main Monster Zones + Deck -->
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
-                            <Border Width="78" Height="111" Margin="3" Tag="gy" Cursor="Hand"
-                                    AllowDrop="True" Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click"
-                                    Background="#22FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
-                                    CornerRadius="4">
-                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                    <TextBlock Text="GY" HorizontalAlignment="Center" FontSize="11"/>
-                                    <TextBlock Text="{Binding Graveyard.Count}" HorizontalAlignment="Center" FontSize="18"/>
-                                </StackPanel>
-                            </Border>
-                            <ItemsControl ItemsSource="{Binding MainMonsterZones}" Style="{StaticResource ZoneRow}"/>
-                            <Border Width="78" Height="111" Margin="3" Tag="deck" Cursor="Hand"
-                                    AllowDrop="True" Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click"
-                                    Background="#22FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
-                                    CornerRadius="4">
-                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                    <TextBlock Text="Deck" HorizontalAlignment="Center" FontSize="11"/>
-                                    <TextBlock Text="{Binding Deck.Count}" HorizontalAlignment="Center" FontSize="18"/>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
+                        <!-- Left flank: Field (top), Extra Deck (bottom) -->
+                        <ContentControl Grid.Row="0" Grid.Column="0" Content="{Binding FieldZone}"
+                                        ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource PileBorder}" Tag="extra"
+                                Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <TextBlock Text="Extra" HorizontalAlignment="Center" FontSize="11"/>
+                                <TextBlock Text="{Binding ExtraDeck.Count}" HorizontalAlignment="Center" FontSize="20"/>
+                            </StackPanel>
+                        </Border>
 
-                        <!-- Banished + Spell/Trap Zones + Field -->
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <Border Width="78" Height="111" Margin="3" Tag="ban" Cursor="Hand"
-                                    AllowDrop="True" Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click"
-                                    Background="#22FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
-                                    CornerRadius="4">
-                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                    <TextBlock Text="Banish" HorizontalAlignment="Center" FontSize="11"/>
-                                    <TextBlock Text="{Binding Banished.Count}" HorizontalAlignment="Center" FontSize="18"/>
-                                </StackPanel>
-                            </Border>
-                            <ItemsControl ItemsSource="{Binding SpellTrapZones}" Style="{StaticResource ZoneRow}"/>
-                            <ContentControl Content="{Binding FieldZone}"
-                                            ContentTemplate="{StaticResource ZoneTemplate}"/>
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
+                        <!-- Extra Monster Zones above monster zones 2 and 4 -->
+                        <ContentControl Grid.Row="0" Grid.Column="2" Content="{Binding ExtraMonsterZones[0]}"
+                                        ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <ContentControl Grid.Row="0" Grid.Column="4" Content="{Binding ExtraMonsterZones[1]}"
+                                        ContentTemplate="{StaticResource ZoneTemplate}"/>
+
+                        <!-- Main Monster Zones -->
+                        <ContentControl Grid.Row="1" Grid.Column="1" Content="{Binding MainMonsterZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <ContentControl Grid.Row="1" Grid.Column="2" Content="{Binding MainMonsterZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <ContentControl Grid.Row="1" Grid.Column="3" Content="{Binding MainMonsterZones[2]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <ContentControl Grid.Row="1" Grid.Column="4" Content="{Binding MainMonsterZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <ContentControl Grid.Row="1" Grid.Column="5" Content="{Binding MainMonsterZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+
+                        <!-- Spell/Trap Zones -->
+                        <ContentControl Grid.Row="2" Grid.Column="1" Content="{Binding SpellTrapZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <ContentControl Grid.Row="2" Grid.Column="2" Content="{Binding SpellTrapZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <ContentControl Grid.Row="2" Grid.Column="3" Content="{Binding SpellTrapZones[2]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <ContentControl Grid.Row="2" Grid.Column="4" Content="{Binding SpellTrapZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        <ContentControl Grid.Row="2" Grid.Column="5" Content="{Binding SpellTrapZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+
+                        <!-- Right flank: Graveyard (top), Banished (middle), Deck (bottom) -->
+                        <Border Grid.Row="0" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="gy"
+                                Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <TextBlock Text="GY" HorizontalAlignment="Center" FontSize="11"/>
+                                <TextBlock Text="{Binding Graveyard.Count}" HorizontalAlignment="Center" FontSize="20"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Row="1" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="ban"
+                                Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <TextBlock Text="Banish" HorizontalAlignment="Center" FontSize="11"/>
+                                <TextBlock Text="{Binding Banished.Count}" HorizontalAlignment="Center" FontSize="20"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Row="2" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="deck"
+                                Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <TextBlock Text="Deck" HorizontalAlignment="Center" FontSize="11"/>
+                                <TextBlock Text="{Binding Deck.Count}" HorizontalAlignment="Center" FontSize="20"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Viewbox>
 
                 <!-- Hand -->
                 <Border Grid.Row="1" Tag="hand" AllowDrop="True" Drop="Pile_Drop"
                         Background="#14FFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
-                        CornerRadius="4" Margin="0,8,0,0" MinHeight="120">
+                        CornerRadius="4" Margin="0,8,0,0" MinHeight="134">
                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                         <ItemsControl ItemsSource="{Binding Hand}" ItemTemplate="{StaticResource BoardCardTemplate}"
                                       Margin="6">
@@ -187,11 +207,11 @@
         <!-- Pile viewer (Deck / Extra / GY / Banished contents) -->
         <Popup x:Name="PileViewer" Placement="Center" StaysOpen="False" AllowsTransparency="True">
             <Border Background="#F0202020" BorderBrush="#60FFFFFF" BorderThickness="1"
-                    CornerRadius="6" Padding="12" MaxWidth="720">
+                    CornerRadius="6" Padding="12" MaxWidth="760">
                 <DockPanel>
                     <TextBlock x:Name="PileViewerTitle" DockPanel.Dock="Top" FontSize="16"
                                FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="460" Width="680">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="470" Width="720">
                         <ItemsControl x:Name="PileViewerItems" ItemTemplate="{StaticResource BoardCardTemplate}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
