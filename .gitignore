@@ -361,3 +361,8 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Local SQLite card database (regenerated via the in-app Import button)
+cards.db
+cards.db-shm
+cards.db-wal
