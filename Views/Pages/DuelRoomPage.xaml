@@ -4,11 +4,202 @@
       xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:controls="clr-namespace:YGODuelSimulator.Views.Controls"
       mc:Ignorable="d"
       Title="Duel Room">
-    <StackPanel Margin="16" VerticalAlignment="Center" HorizontalAlignment="Center">
-        <ui:SymbolIcon Symbol="Games24" FontSize="48" HorizontalAlignment="Center"/>
-        <TextBlock Text="Duel Room" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-        <TextBlock Text="Coming soon — this is where duels will happen." Opacity="0.7" HorizontalAlignment="Center"/>
-    </StackPanel>
+    <Page.Resources>
+        <!-- A card in play: front image (rotated for defense) or a face-down back,
+             draggable, with a right-click action menu and left-click to inspect. -->
+        <DataTemplate x:Key="BoardCardTemplate">
+            <Grid Width="72" Height="105" Cursor="Hand" Background="Transparent"
+                  ToolTip="{Binding Name}" RenderTransformOrigin="0.5,0.5"
+                  PreviewMouseLeftButtonDown="Card_PreviewMouseLeftButtonDown"
+                  MouseMove="Card_MouseMove"
+                  MouseLeftButtonUp="Card_MouseLeftButtonUp">
+                <Grid.RenderTransform>
+                    <RotateTransform Angle="{Binding Rotation}"/>
+                </Grid.RenderTransform>
+                <Image Source="{Binding Image}" Stretch="Uniform" Visibility="{Binding FrontVisibility}"/>
+                <Border Visibility="{Binding BackVisibility}" CornerRadius="4"
+                        BorderBrush="#40FFFFFF" BorderThickness="1">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#7A4B2B" Offset="0"/>
+                            <GradientStop Color="#3A2416" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+                <Grid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="To Attack" Click="ToAttack_Click"/>
+                        <MenuItem Header="To Defense" Click="ToDefense_Click"/>
+                        <MenuItem Header="Set face-down" Click="SetFaceDown_Click"/>
+                        <MenuItem Header="Flip" Click="Flip_Click"/>
+                        <Separator/>
+                        <MenuItem Header="Send to Graveyard" Click="ToGrave_Click"/>
+                        <MenuItem Header="Banish" Click="ToBanish_Click"/>
+                        <MenuItem Header="Return to Hand" Click="ToHand_Click"/>
+                        <MenuItem Header="To Deck (top)" Click="ToDeckTop_Click"/>
+                        <MenuItem Header="To Deck (bottom)" Click="ToDeckBottom_Click"/>
+                    </ContextMenu>
+                </Grid.ContextMenu>
+            </Grid>
+        </DataTemplate>
+
+        <!-- A single-card zone: a drop target that shows its card (if any). -->
+        <DataTemplate x:Key="ZoneTemplate">
+            <Border Width="78" Height="111" Margin="3" AllowDrop="True" Drop="Zone_Drop"
+                    Background="#18FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
+                    CornerRadius="4">
+                <ContentControl Content="{Binding Card}"
+                                ContentTemplate="{StaticResource BoardCardTemplate}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+        </DataTemplate>
+
+        <Style x:Key="ZoneRow" TargetType="ItemsControl">
+            <Setter Property="ItemTemplate" Value="{StaticResource ZoneTemplate}"/>
+            <Setter Property="ItemsPanel">
+                <Setter.Value>
+                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Page.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar -->
+        <ui:CardControl Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal">
+                <ComboBox x:Name="DeckPicker" Width="160" VerticalAlignment="Center"/>
+                <ui:Button Content="Load" Margin="6,0,0,0" Click="Load_Click"/>
+                <ui:Button Content="Draw" Margin="6,0,0,0" Appearance="Primary" Click="Draw_Click"/>
+                <ui:Button Content="Shuffle" Margin="6,0,0,0" Click="Shuffle_Click"/>
+
+                <TextBlock Text="LP" VerticalAlignment="Center" Margin="16,0,4,0" FontWeight="SemiBold"/>
+                <ui:TextBox x:Name="LpBox" Width="70" Text="8000" KeyDown="Lp_KeyDown"/>
+                <ui:Button Content="−1000" Margin="4,0,0,0" Click="LpMinus1000_Click"/>
+                <ui:Button Content="−500" Margin="4,0,0,0" Click="LpMinus500_Click"/>
+                <ui:Button Content="Reset" Margin="4,0,0,0" Click="LpReset_Click"/>
+
+                <ui:Button Content="Roll die" Margin="16,0,0,0" Click="Die_Click"/>
+                <ui:Button Content="Flip coin" Margin="4,0,0,0" Click="Coin_Click"/>
+                <TextBlock x:Name="ResultText" VerticalAlignment="Center" Margin="12,0,0,0"
+                           FontWeight="SemiBold"/>
+            </StackPanel>
+        </ui:CardControl>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Inspector -->
+            <controls:CardPreview x:Name="Preview" Grid.Column="0"/>
+
+            <!-- Playmat -->
+            <Grid Grid.Column="1" Margin="16,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Auto">
+                    <StackPanel HorizontalAlignment="Center">
+                        <!-- Extra Monster Zones + Extra Deck -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
+                            <Border Width="78" Height="111" Margin="3" Tag="extra" Cursor="Hand"
+                                    AllowDrop="True" Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click"
+                                    Background="#22FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
+                                    CornerRadius="4">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock Text="Extra" HorizontalAlignment="Center" FontSize="11"/>
+                                    <TextBlock Text="{Binding ExtraDeck.Count}" HorizontalAlignment="Center" FontSize="18"/>
+                                </StackPanel>
+                            </Border>
+                            <ItemsControl ItemsSource="{Binding ExtraMonsterZones}" Style="{StaticResource ZoneRow}"/>
+                        </StackPanel>
+
+                        <!-- Graveyard + Main Monster Zones + Deck -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
+                            <Border Width="78" Height="111" Margin="3" Tag="gy" Cursor="Hand"
+                                    AllowDrop="True" Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click"
+                                    Background="#22FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
+                                    CornerRadius="4">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock Text="GY" HorizontalAlignment="Center" FontSize="11"/>
+                                    <TextBlock Text="{Binding Graveyard.Count}" HorizontalAlignment="Center" FontSize="18"/>
+                                </StackPanel>
+                            </Border>
+                            <ItemsControl ItemsSource="{Binding MainMonsterZones}" Style="{StaticResource ZoneRow}"/>
+                            <Border Width="78" Height="111" Margin="3" Tag="deck" Cursor="Hand"
+                                    AllowDrop="True" Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click"
+                                    Background="#22FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
+                                    CornerRadius="4">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock Text="Deck" HorizontalAlignment="Center" FontSize="11"/>
+                                    <TextBlock Text="{Binding Deck.Count}" HorizontalAlignment="Center" FontSize="18"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Banished + Spell/Trap Zones + Field -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Border Width="78" Height="111" Margin="3" Tag="ban" Cursor="Hand"
+                                    AllowDrop="True" Drop="Pile_Drop" MouseLeftButtonUp="Pile_Click"
+                                    Background="#22FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1"
+                                    CornerRadius="4">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock Text="Banish" HorizontalAlignment="Center" FontSize="11"/>
+                                    <TextBlock Text="{Binding Banished.Count}" HorizontalAlignment="Center" FontSize="18"/>
+                                </StackPanel>
+                            </Border>
+                            <ItemsControl ItemsSource="{Binding SpellTrapZones}" Style="{StaticResource ZoneRow}"/>
+                            <ContentControl Content="{Binding FieldZone}"
+                                            ContentTemplate="{StaticResource ZoneTemplate}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Hand -->
+                <Border Grid.Row="1" Tag="hand" AllowDrop="True" Drop="Pile_Drop"
+                        Background="#14FFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                        CornerRadius="4" Margin="0,8,0,0" MinHeight="120">
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding Hand}" ItemTemplate="{StaticResource BoardCardTemplate}"
+                                      Margin="6">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- Pile viewer (Deck / Extra / GY / Banished contents) -->
+        <Popup x:Name="PileViewer" Placement="Center" StaysOpen="False" AllowsTransparency="True">
+            <Border Background="#F0202020" BorderBrush="#60FFFFFF" BorderThickness="1"
+                    CornerRadius="6" Padding="12" MaxWidth="720">
+                <DockPanel>
+                    <TextBlock x:Name="PileViewerTitle" DockPanel.Dock="Top" FontSize="16"
+                               FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="460" Width="680">
+                        <ItemsControl x:Name="PileViewerItems" ItemTemplate="{StaticResource BoardCardTemplate}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Popup>
+    </Grid>
 </Page>
