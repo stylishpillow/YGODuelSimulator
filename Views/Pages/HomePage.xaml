@@ -1,0 +1,49 @@
+<Page x:Class="YGODuelSimulator.Views.Pages.HomePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      mc:Ignorable="d"
+      Title="Home">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16">
+            <TextBlock Text="Main Menu" FontSize="28" FontWeight="Bold"/>
+            <TextBlock Text="Where do you want to go?" Opacity="0.7" Margin="0,4,0,20"/>
+
+            <WrapPanel>
+                <ui:CardAction x:Name="DuelRoomTile" Click="DuelRoomTile_Click"
+                               Width="240" Margin="0,0,12,12" Icon="{ui:SymbolIcon Games24}">
+                    <StackPanel>
+                        <TextBlock Text="Duel Room" FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="Play a duel against another player." Opacity="0.7" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </ui:CardAction>
+
+                <ui:CardAction x:Name="DeckConstructorTile" Click="DeckConstructorTile_Click"
+                               Width="240" Margin="0,0,12,12" Icon="{ui:SymbolIcon Layer24}">
+                    <StackPanel>
+                        <TextBlock Text="Deck Constructor" FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="Build and save your decks." Opacity="0.7" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </ui:CardAction>
+
+                <ui:CardAction x:Name="CardDatabaseTile" Click="CardDatabaseTile_Click"
+                               Width="240" Margin="0,0,12,12" Icon="{ui:SymbolIcon Database24}">
+                    <StackPanel>
+                        <TextBlock Text="Card Database" FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="Browse and search every card." Opacity="0.7" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </ui:CardAction>
+
+                <ui:CardAction x:Name="ProfileTile" Click="ProfileTile_Click"
+                               Width="240" Margin="0,0,12,12" Icon="{ui:SymbolIcon Person24}">
+                    <StackPanel>
+                        <TextBlock Text="Profile" FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="View your profile and stats." Opacity="0.7" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </ui:CardAction>
+            </WrapPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
