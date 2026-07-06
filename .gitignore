@@ -372,3 +372,10 @@ cards.db-wal
 
 # Lazily-downloaded card image cache
 images/
+
+# Velopack installer output (built by the release workflow / vpk pack)
+releases/
+
+# The stock rule above ignores *.pubxml, but our self-contained publish profile
+# is checked in on purpose — the release workflow builds with it.
+!Properties/PublishProfiles/win-x64.pubxml

@@ -30,3 +30,41 @@ Because a gzip blob can't be delta-compressed by Git, each refresh adds roughly
 the seed's compressed size to history. That's fine for infrequent set updates; if
 the seed ever grows large or you update often, move it to a GitHub Release asset
 or Git LFS instead.
+
+## Releasing (installer + auto-update)
+
+The app is distributed as a downloadable Windows installer via
+[Velopack](https://velopack.io). Publishing is automated: pushing a version tag
+triggers `.github/workflows/release.yml`, which builds a self-contained
+(no .NET runtime required) 64-bit build and creates a GitHub Release with:
+
+- `YGODuelSimulator-win-Setup.exe` — the installer users download and run.
+- a `-full.nupkg` update feed so installed apps can auto-update from Releases.
+- `YGODuelSimulator-win-Portable.zip` — a no-install portable build.
+
+To cut a release, bump `<Version>` in `YGODuelSimulator.csproj` if you like, then:
+
+```
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+To build the installer locally instead (output lands in `releases/`, git-ignored):
+
+```
+dotnet publish YGODuelSimulator.csproj -c Release /p:PublishProfile=win-x64
+dotnet tool install -g vpk --version 1.2.0
+vpk pack --packId YGODuelSimulator --packTitle "YGO Duel Simulator" \
+  --packVersion 0.1.0 --packDir bin/Release/publish/win-x64 \
+  --mainExe YGODuelSimulator.exe --outputDir releases
+```
+
+**Code signing:** builds are currently unsigned, so Windows SmartScreen shows an
+"unknown publisher" prompt on first run (users click *More info → Run anyway*).
+Add a signing certificate later to remove it.
+
+**Note on installed data:** Velopack installs per-user under `%LocalAppData%`,
+which is writable, so the app's `cards.db`/`images/` (written next to the exe via
+`AppPaths`) work there. If the app is ever installed to a read-only location,
+that writable data should move to a dedicated per-user folder — a future
+hardening step.
