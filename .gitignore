@@ -366,3 +366,6 @@ FodyWeavers.xsd
 cards.db
 cards.db-shm
 cards.db-wal
+
+# Lazily-downloaded card image cache
+images/

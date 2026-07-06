@@ -5,9 +5,10 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:YGODuelSimulator"
         mc:Ignorable="d"
-        Title="YGO Duel Simulator — Card Database" Height="450" Width="800">
+        Title="YGO Duel Simulator — Card Database" Height="560" Width="820">
     <Grid Margin="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -25,5 +26,26 @@
 
         <TextBlock Grid.Row="2" x:Name="StatusText" Margin="0,12,0,0"
                    TextWrapping="Wrap" Text="Ready."/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0">
+            <TextBlock Text="Card name:" VerticalAlignment="Center"/>
+            <TextBox x:Name="CardNameBox" Width="260" Margin="8,0" Padding="4,3"
+                     VerticalContentAlignment="Center" KeyDown="CardNameBox_KeyDown"/>
+            <Button x:Name="ShowCardButton" Content="Show Card"
+                    Padding="12,6" Click="ShowCardButton_Click"/>
+        </StackPanel>
+
+        <Grid Grid.Row="4" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Width="240" BorderBrush="#40808080" BorderThickness="1">
+                <Image x:Name="CardImage" Stretch="Uniform"/>
+            </Border>
+            <TextBlock Grid.Column="1" x:Name="CardDetailsText" Margin="16,0,0,0"
+                       TextWrapping="Wrap" VerticalAlignment="Top"
+                       Text="Enter a card name and click Show Card."/>
+        </Grid>
     </Grid>
 </Window>
