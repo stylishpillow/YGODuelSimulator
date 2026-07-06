@@ -1,43 +1,33 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using Microsoft.EntityFrameworkCore;
 using YGODuelSimulator.Data;
 using YGODuelSimulator.Services;
 
-namespace YGODuelSimulator
+namespace YGODuelSimulator.Views.Pages
 {
     /// <summary>
-    /// Interaction logic for MainWindow.xaml
+    /// Card database screen: import/refresh the local database, export the bundled
+    /// seed, and look up individual cards with their artwork.
     /// </summary>
-    public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
+    public partial class CardDatabasePage : Page
     {
         private readonly CardImportService _importService = new();
         private readonly CardImageService _imageService = new();
 
-        public MainWindow()
+        public CardDatabasePage()
         {
             InitializeComponent();
-
-            // Keep the window's theme (and the Mica backdrop) in sync with the OS
-            // light/dark setting.
-            Wpf.Ui.Appearance.SystemThemeWatcher.Watch(this);
-
-            Loaded += MainWindow_Loaded;
+            Loaded += CardDatabasePage_Loaded;
         }
 
-        private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        private async void CardDatabasePage_Loaded(object sender, RoutedEventArgs e)
         {
-            // First run: if there's no database yet, unpack the bundled seed so the
-            // user starts with every card without hitting the YGOPRODeck API.
-            var seeded = DatabaseSeeder.EnsureSeeded();
-
-            // Make sure the database and schema exist, then show the current count.
-            await using var db = new AppDbContext();
-            await db.Database.MigrateAsync();
+            // The database is already created/migrated by the app shell on startup,
+            // so here we only need the current count.
             await RefreshCountAsync();
-
-            if (seeded) StatusText.Text = "Loaded the bundled card database.";
         }
 
         private async void ImportButton_Click(object sender, RoutedEventArgs e)

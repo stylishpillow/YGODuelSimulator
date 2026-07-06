@@ -1,0 +1,23 @@
+<Page x:Class="YGODuelSimulator.Views.Pages.SettingsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      mc:Ignorable="d"
+      Title="Settings">
+    <StackPanel Margin="16">
+        <TextBlock Text="Settings" FontSize="24" FontWeight="Bold"/>
+
+        <TextBlock Text="Appearance" FontSize="16" FontWeight="SemiBold" Margin="0,20,0,8"/>
+        <TextBlock Text="Theme" Opacity="0.7" Margin="0,0,0,8"/>
+        <StackPanel>
+            <RadioButton x:Name="ThemeSystemRadio" Content="Follow system" GroupName="Theme"
+                         Checked="ThemeSystemRadio_Checked" Margin="0,2"/>
+            <RadioButton x:Name="ThemeLightRadio" Content="Light" GroupName="Theme"
+                         Checked="ThemeLightRadio_Checked" Margin="0,2"/>
+            <RadioButton x:Name="ThemeDarkRadio" Content="Dark" GroupName="Theme"
+                         Checked="ThemeDarkRadio_Checked" Margin="0,2"/>
+        </StackPanel>
+    </StackPanel>
+</Page>

@@ -1,0 +1,14 @@
+<Page x:Class="YGODuelSimulator.Views.Pages.ProfilePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      mc:Ignorable="d"
+      Title="Profile">
+    <StackPanel Margin="16" VerticalAlignment="Center" HorizontalAlignment="Center">
+        <ui:SymbolIcon Symbol="Person24" FontSize="48" HorizontalAlignment="Center"/>
+        <TextBlock Text="Profile" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+        <TextBlock Text="Coming soon — your profile and stats will live here." Opacity="0.7" HorizontalAlignment="Center"/>
+    </StackPanel>
+</Page>
