@@ -23,6 +23,7 @@
         <ListBox x:Name="ResultsList" Grid.Row="2"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  HorizontalContentAlignment="Stretch"
+                 SelectionChanged="ResultsList_SelectionChanged"
                  MouseDoubleClick="ResultsList_MouseDoubleClick">
             <ListBox.ItemsPanel>
                 <ItemsPanelTemplate>

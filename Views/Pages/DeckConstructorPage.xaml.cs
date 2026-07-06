@@ -70,6 +70,8 @@ namespace YGODuelSimulator.Views.Pages
 
         private void Browser_CardActivated(object? sender, Card card) => AddCard(card);
 
+        private void Browser_CardSelected(object? sender, Card card) => Preview.Show(card);
+
         private void AddCard(Card card)
         {
             if (TotalCopies(card.Id) >= MaxCopies(card))
@@ -120,9 +122,19 @@ namespace YGODuelSimulator.Views.Pages
         private static DeckSlot? SlotFrom(object sender) =>
             (sender as FrameworkElement)?.DataContext as DeckSlot;
 
-        private void Slot_LeftClick(object sender, MouseButtonEventArgs e)
+        private void Slot_MouseDown(object sender, MouseButtonEventArgs e)
         {
-            if (SlotFrom(sender) is { } slot) RemoveOneFrom(slot);
+            if (SlotFrom(sender) is not { } slot) return;
+            if (e.ClickCount == 2) RemoveOneFrom(slot);   // double-click removes one
+            else Preview.Show(slot.Card);                 // single-click inspects
+        }
+
+        private void DeckScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            // Make the wheel scroll the deck area no matter what's under the cursor.
+            var sv = (ScrollViewer)sender;
+            sv.ScrollToVerticalOffset(sv.VerticalOffset - e.Delta);
+            e.Handled = true;
         }
 
         private void RemoveOne_Click(object sender, RoutedEventArgs e)

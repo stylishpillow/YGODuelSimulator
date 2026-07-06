@@ -23,8 +23,11 @@ namespace YGODuelSimulator.Views.Controls
 
         public ObservableCollection<CardThumbnail> Results { get; } = [];
 
-        /// <summary>Raised when the user double-clicks a card in the results.</summary>
+        /// <summary>Raised when the user double-clicks a card in the results (add).</summary>
         public event EventHandler<Card>? CardActivated;
+
+        /// <summary>Raised when the selected card changes (single click; for preview).</summary>
+        public event EventHandler<Card>? CardSelected;
 
         public CardBrowser()
         {
@@ -102,6 +105,12 @@ namespace YGODuelSimulator.Views.Controls
             {
                 // A single failed image shouldn't break the whole grid.
             }
+        }
+
+        private void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ResultsList.SelectedItem is CardThumbnail t)
+                CardSelected?.Invoke(this, t.Card);
         }
 
         private void ResultsList_MouseDoubleClick(object sender, MouseButtonEventArgs e)

@@ -12,7 +12,7 @@
              removes one copy; right-click opens the slot context menu. -->
         <DataTemplate x:Key="DeckSlotTemplate">
             <Grid Width="72" Margin="3" Cursor="Hand" Background="Transparent"
-                  ToolTip="{Binding Card.Name}" MouseLeftButtonUp="Slot_LeftClick">
+                  ToolTip="{Binding Card.Name}" MouseLeftButtonDown="Slot_MouseDown">
                 <Image Source="{Binding Image}" Stretch="Uniform" Height="105"/>
                 <Border VerticalAlignment="Bottom" HorizontalAlignment="Right"
                         Background="#CC000000" CornerRadius="4" Padding="4,0" Margin="2"
@@ -32,16 +32,21 @@
 
     <Grid Margin="16">
         <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="260"/>
             <ColumnDefinition Width="340"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <!-- Left: reusable card browser -->
-        <controls:CardBrowser x:Name="Browser" Grid.Column="0"
-                              CardActivated="Browser_CardActivated"/>
+        <!-- Left: card close-up / inspector -->
+        <controls:CardPreview x:Name="Preview" Grid.Column="0"/>
+
+        <!-- Middle: reusable card browser -->
+        <controls:CardBrowser x:Name="Browser" Grid.Column="1" Margin="16,0,0,0"
+                              CardActivated="Browser_CardActivated"
+                              CardSelected="Browser_CardSelected"/>
 
         <!-- Right: the deck -->
-        <Grid Grid.Column="1" Margin="16,0,0,0">
+        <Grid Grid.Column="2" Margin="16,0,0,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -64,7 +69,8 @@
                 <TextBlock x:Name="StatusText" VerticalAlignment="Center" Margin="16,0,0,0" Opacity="0.7"/>
             </StackPanel>
 
-            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <ScrollViewer x:Name="DeckScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto"
+                          PreviewMouseWheel="DeckScroll_PreviewMouseWheel">
                 <StackPanel>
                     <TextBlock x:Name="MainHeader" FontWeight="SemiBold" Margin="0,4"/>
                     <ItemsControl x:Name="MainList" ItemTemplate="{StaticResource DeckSlotTemplate}">
