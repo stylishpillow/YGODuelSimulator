@@ -47,6 +47,10 @@ namespace YGODuelSimulator.Views.Pages
         private BoardCard? _attackFrom;
         private readonly DispatcherTimer _attackTimer;
 
+        // An armed "swap control": the monster, waiting for a destination zone click on
+        // the other player's side. Null when no swap is pending.
+        private BoardCard? _swapCard;
+
         // Networked play. Null / false while offline (hot-seat practice).
         private DuelSession? _session;
         private bool _networked;
@@ -211,6 +215,7 @@ namespace YGODuelSimulator.Views.Pages
         {
             if ((sender as FrameworkElement)?.DataContext is not BoardCard card) return;
             CancelAttackDeclaration();
+            EndSwap();
             _state.Selected = card;
             // Online, you can only play your own cards.
             if (_networked && _state.FindBoard(card) != _state.Player) { e.Handled = true; return; }
@@ -368,6 +373,8 @@ namespace YGODuelSimulator.Views.Pages
         // --- Control swap ("brain control": the monster moves to the other side, whose
         //     player then owns it) ---
 
+        // Arms the swap: highlight the other player's empty Monster Zones so the player
+        // chooses exactly where the monster lands (in case a zone is already occupied).
         private void SwapControl_Click(object sender, RoutedEventArgs e)
         {
             ViewMenu.IsOpen = false;
@@ -377,13 +384,25 @@ namespace YGODuelSimulator.Views.Pages
                 ResultText.Text = "Only a monster on the field can change control.";
                 return;
             }
-            var fromBoard = src.board;
-            var toBoard = fromBoard == _state.Player ? _state.Opponent : _state.Player;
-            if (FirstEmptyMonsterZone(toBoard) is not { } dest)
+            var toBoard = src.board == _state.Player ? _state.Opponent : _state.Player;
+            if (!toBoard.MainMonsterZones.Any(s => s.IsEmpty))
             {
                 ResultText.Text = $"{toBoard.DisplayName} has no free Monster Zone.";
                 return;
             }
+
+            _swapCard = c;
+            _pending = null; // not a normal placement
+            _state.HighlightTargets(toBoard, ZoneKind.MainMonster);
+            ResultText.Text = $"Pick a Monster Zone on {toBoard.DisplayName}'s side for {NameOf(c)} (Esc to cancel).";
+        }
+
+        // Completes an armed swap into the clicked, highlighted zone.
+        private void CompleteSwap(BoardCard c, ZoneSlot dest)
+        {
+            if (MonsterZoneOf(c) is not { } src) { EndSwap(); return; }
+            var fromBoard = src.board;
+            var toBoard = dest.Owner;
 
             var faceDown = c.FaceDown;
             var defense = c.Defense;
@@ -397,11 +416,15 @@ namespace YGODuelSimulator.Views.Pages
                     DestZone = dest.Kind, DestIndex = dest.Index,
                     FaceDown = faceDown, Defense = defense,
                 });
+            EndSwap();
             Deselect();
         }
 
-        private static ZoneSlot? FirstEmptyMonsterZone(PlayerBoard board) =>
-            board.MainMonsterZones.FirstOrDefault(s => s.IsEmpty);
+        private void EndSwap()
+        {
+            _swapCard = null;
+            _state.ClearHighlights();
+        }
 
         private void AnimateAttack(BoardCard attacker, BoardCard? target, bool direct)
         {
@@ -495,6 +518,14 @@ namespace YGODuelSimulator.Views.Pages
         {
             if ((sender as FrameworkElement)?.DataContext is not ZoneSlot slot) return;
 
+            // A pending control swap drops the monster into the chosen highlighted zone.
+            if (_swapCard is { } swapCard && slot.IsTarget)
+            {
+                CompleteSwap(swapCard, slot);
+                e.Handled = true;
+                return;
+            }
+
             // Only meaningful while placing a card into a highlighted, empty zone.
             if (_pending is { } p && slot.IsTarget && _state.Selected is { } card)
             {
@@ -538,13 +569,14 @@ namespace YGODuelSimulator.Views.Pages
         {
             // A click that reached the playmat background cancels the selection.
             CancelAttackDeclaration();
+            EndSwap();
             EndPlacement();
             Deselect();
         }
 
         private void Page_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key == Key.Escape) { CancelAttackDeclaration(); EndPlacement(); Deselect(); }
+            if (e.Key == Key.Escape) { CancelAttackDeclaration(); EndSwap(); EndPlacement(); Deselect(); }
         }
 
         private void CancelAttackDeclaration()
