@@ -9,6 +9,7 @@
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica"
         WindowCornerPreference="Round"
+        Icon="pack://application:,,,/Assets/app-icon.png"
         Title="YGO Duel Simulator" Height="640" Width="1000">
     <Grid>
         <Grid.RowDefinitions>

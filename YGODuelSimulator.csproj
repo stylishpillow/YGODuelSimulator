@@ -12,6 +12,9 @@
     <Authors>Eelco Hansma</Authors>
     <Version>0.1.0</Version>
 
+    <!-- App icon for the executable / taskbar. -->
+    <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
+
     <!-- Self-contained publishes target 64-bit Windows and embed the native
          SQLite library so a single folder runs with no .NET runtime installed. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
@@ -35,6 +38,9 @@
     <Content Include="cards.db.gz" Condition="Exists('cards.db.gz')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+
+    <!-- App icon as a WPF resource so windows can bind it via a pack URI. -->
+    <Resource Include="Assets\app-icon.png" />
   </ItemGroup>
 
   <ItemGroup>
