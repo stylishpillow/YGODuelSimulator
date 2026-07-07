@@ -1,6 +1,5 @@
 using System.Windows;
-using Microsoft.EntityFrameworkCore;
-using YGODuelSimulator.Data;
+using YGODuelSimulator.Services;
 using YGODuelSimulator.Views.Pages;
 
 namespace YGODuelSimulator.Views
@@ -22,24 +21,44 @@ namespace YGODuelSimulator.Views
             // Pages have parameterless constructors, so a trivial provider is enough.
             RootNavigation.SetPageProviderService(new SimplePageProvider());
 
-            Loaded += MainWindow_Loaded;
+            // The card database is an admin-only area.
+            if (!Session.IsAdmin) CardDatabaseNavItem.Visibility = Visibility.Collapsed;
+
+            // Show who's signed in on the footer item that opens their profile.
+            UserNavItem.Content = Session.CurrentUser?.Username ?? "Account";
+
+            Loaded += (_, _) => RootNavigation.Navigate(typeof(HomePage));
         }
 
         /// <summary>Navigates the rail to a page type. Used by the Home dashboard tiles.</summary>
-        public void NavigateTo(Type pageType) => RootNavigation.Navigate(pageType);
-
-        private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        public void NavigateTo(Type pageType)
         {
-            // First run: unpack the bundled card database if there's none yet, then
-            // make sure the schema is current. Done once here so it happens no matter
-            // which page the user opens first.
-            DatabaseSeeder.EnsureSeeded();
-            await using (var db = new AppDbContext())
-            {
-                await db.Database.MigrateAsync();
-            }
+            // Guard the admin-only card database against non-admin navigation.
+            if (pageType == typeof(CardDatabasePage) && !Session.IsAdmin) return;
+            RootNavigation.Navigate(pageType);
+        }
 
-            RootNavigation.Navigate(typeof(HomePage));
+        /// <summary>Signs out and returns to the login window. If the next sign-in is
+        /// cancelled, the app exits.</summary>
+        public void LogOut()
+        {
+            Session.CurrentUser = null;
+
+            var login = new LoginWindow { Owner = this };
+            if (login.ShowDialog() == true && login.AuthenticatedUser is { } user)
+            {
+                Session.CurrentUser = user;
+                var main = new MainWindow();
+                // Re-home the app on the new shell first so closing this window (no
+                // longer the MainWindow) doesn't trigger shutdown.
+                Application.Current.MainWindow = main;
+                main.Show();
+                Close();
+            }
+            else
+            {
+                Application.Current.Shutdown();
+            }
         }
     }
 }

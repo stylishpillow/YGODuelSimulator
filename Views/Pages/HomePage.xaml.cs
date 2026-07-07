@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using YGODuelSimulator.Services;
 
 namespace YGODuelSimulator.Views.Pages
 {
@@ -9,6 +10,9 @@ namespace YGODuelSimulator.Views.Pages
         public HomePage()
         {
             InitializeComponent();
+
+            // The card database is an admin-only area.
+            if (!Session.IsAdmin) CardDatabaseTile.Visibility = Visibility.Collapsed;
         }
 
         private static void NavigateTo(Type pageType) =>

@@ -6,9 +6,52 @@
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       mc:Ignorable="d"
       Title="Profile">
-    <StackPanel Margin="16" VerticalAlignment="Center" HorizontalAlignment="Center">
-        <ui:SymbolIcon Symbol="Person24" FontSize="48" HorizontalAlignment="Center"/>
-        <TextBlock Text="Profile" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-        <TextBlock Text="Coming soon — your profile and stats will live here." Opacity="0.7" HorizontalAlignment="Center"/>
-    </StackPanel>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="24" MaxWidth="560" HorizontalAlignment="Left">
+
+            <!-- Identity header -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,24">
+                <Border Width="72" Height="72" CornerRadius="36" Background="#3355A9E0">
+                    <ui:SymbolIcon Symbol="Person24" FontSize="34"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel VerticalAlignment="Center" Margin="18,0,0,0">
+                    <TextBlock x:Name="UsernameText" FontSize="26" FontWeight="Bold"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                        <Border x:Name="RoleBadge" CornerRadius="10" Padding="10,2" Background="#33FFFFFF">
+                            <TextBlock x:Name="RoleText" FontSize="12" FontWeight="SemiBold"/>
+                        </Border>
+                        <TextBlock x:Name="MemberSinceText" Opacity="0.7" VerticalAlignment="Center"
+                                   Margin="10,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Change password -->
+            <ui:Card Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="Change password" FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock Text="Use at least 8 characters." Opacity="0.7" Margin="0,2,0,12"/>
+
+                    <TextBlock Text="Current password" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <PasswordBox x:Name="CurrentPw"/>
+
+                    <TextBlock Text="New password" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                    <PasswordBox x:Name="NewPw"/>
+
+                    <TextBlock Text="Confirm new password" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                    <PasswordBox x:Name="ConfirmPw"/>
+
+                    <TextBlock x:Name="PwStatus" TextWrapping="Wrap" Margin="0,12,0,0" Visibility="Collapsed"/>
+
+                    <ui:Button Content="Update password" Appearance="Primary"
+                               Margin="0,16,0,0" Click="ChangePassword_Click"/>
+                </StackPanel>
+            </ui:Card>
+
+            <!-- Session -->
+            <ui:Button Content="Log out" Icon="{ui:SymbolIcon ArrowExit20}"
+                       HorizontalAlignment="Left" Click="Logout_Click"/>
+        </StackPanel>
+    </ScrollViewer>
 </Page>
