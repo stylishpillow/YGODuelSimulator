@@ -216,6 +216,30 @@
                 <Run Text="  "/><Run Text="{Binding Text, Mode=OneWay}"/>
             </TextBlock>
         </DataTemplate>
+
+        <!-- Overlay for a shared Extra Monster Zone: the opponent's half of the cell,
+             drawn on top of the player's zone. It only appears when the opponent has a
+             card there (or is targeting it), so an empty overlay never hides the
+             player's own card or blocks the player's drop underneath. -->
+        <DataTemplate x:Key="ExtraOverlayTemplate">
+            <Grid>
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding Card}" Value="{x:Null}"/>
+                                    <Condition Binding="{Binding IsTarget}" Value="False"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+            </Grid>
+        </DataTemplate>
     </Page.Resources>
 
     <Grid x:Name="RootGrid" Margin="16,0,16,0" VerticalAlignment="Top">
@@ -286,17 +310,22 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <!-- Opponent's hand -->
+                <!-- Opponent's hand + portrait (docked to the deck/GY side). -->
                 <Border Grid.Row="0" Background="#14FFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
                         CornerRadius="4" Margin="0,0,0,6" MinHeight="90">
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                        <StackPanel Orientation="Horizontal" Margin="6">
-                            <TextBlock Text="Opp hand" Foreground="#99FFFFFF" VerticalAlignment="Center"
-                                       Margin="0,0,8,0" FontSize="11"/>
-                            <ItemsControl ItemsSource="{Binding Opponent.Hand}" ItemTemplate="{StaticResource BoardCardTemplate}"
-                                          ItemsPanel="{StaticResource HorizontalHand}"/>
-                        </StackPanel>
-                    </ScrollViewer>
+                    <DockPanel>
+                        <ContentControl DockPanel.Dock="Right" Content="{Binding Opponent}"
+                                        ContentTemplate="{StaticResource PortraitTemplate}"
+                                        VerticalAlignment="Center" Margin="8,4"/>
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                            <StackPanel Orientation="Horizontal" Margin="6">
+                                <TextBlock Text="Opp hand" Foreground="#99FFFFFF" VerticalAlignment="Center"
+                                           Margin="0,0,8,0" FontSize="11"/>
+                                <ItemsControl ItemsSource="{Binding Opponent.Hand}" ItemTemplate="{StaticResource BoardCardTemplate}"
+                                              ItemsPanel="{StaticResource HorizontalHand}"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </DockPanel>
                 </Border>
 
                 <!-- Playmat: opponent half (top) and player half (bottom), extra
@@ -315,15 +344,16 @@
                                 <Run Text="OPPONENT   ·   LP "/><Run Text="{Binding Opponent.LifePoints}"/>
                             </TextBlock>
 
-                            <!-- Opponent half: S/T row (top), monster row, extra monster band (bottom) -->
+                            <!-- Opponent half: S/T row (top), then monster row (adjacent to
+                                 the shared centre band). Banished sits beside the GY. -->
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
+                                    <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
+                                    <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
                                 <!-- S/T row -->
@@ -373,11 +403,7 @@
                                         <TextBlock Text="{Binding Opponent.Graveyard.Count}" HorizontalAlignment="Center" FontSize="20"/>
                                     </StackPanel>
                                 </Border>
-
-                                <!-- Extra Monster band -->
-                                <ContentControl Grid.Row="2" Grid.Column="2" Content="{Binding Opponent.ExtraMonsterZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="2" Grid.Column="4" Content="{Binding Opponent.ExtraMonsterZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <Border Grid.Row="2" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="o:ban" MouseLeftButtonUp="Pile_Click">
+                                <Border Grid.Row="1" Grid.Column="7" Style="{StaticResource PileBorder}" Tag="o:ban" MouseLeftButtonUp="Pile_Click">
                                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                                         <TextBlock Text="Banish" HorizontalAlignment="Center" FontSize="11"/>
                                         <TextBlock Text="{Binding Opponent.Banished.Count}" HorizontalAlignment="Center" FontSize="20"/>
@@ -385,46 +411,60 @@
                                 </Border>
                             </Grid>
 
-                            <!-- Centre divider between the two players -->
-                            <Border Height="2" Background="#33FFFFFF" Margin="0,6" CornerRadius="1"/>
+                            <!-- Shared centre band: the two Extra Monster Zones, used by both
+                                 players. Each cell is the player's zone with the opponent's
+                                 zone overlaid (the overlay shows only when they occupy it). -->
+                            <Grid Margin="0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
+                                    <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
+                                    <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
+                                </Grid.ColumnDefinitions>
 
-                            <!-- Player half: extra monster band (top), monster row, S/T row (bottom) -->
+                                <Grid Grid.Column="2">
+                                    <ContentControl Content="{Binding Player.ExtraMonsterZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                    <ContentControl Content="{Binding Opponent.ExtraMonsterZones[0]}" ContentTemplate="{StaticResource ExtraOverlayTemplate}"/>
+                                </Grid>
+                                <Grid Grid.Column="4">
+                                    <ContentControl Content="{Binding Player.ExtraMonsterZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                    <ContentControl Content="{Binding Opponent.ExtraMonsterZones[1]}" ContentTemplate="{StaticResource ExtraOverlayTemplate}"/>
+                                </Grid>
+                            </Grid>
+
+                            <!-- Player half: monster row (adjacent to the centre band), then
+                                 S/T row. Banished sits beside the GY. -->
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
+                                    <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
+                                    <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
-                                <!-- Extra Monster band -->
-                                <ContentControl Grid.Row="0" Grid.Column="2" Content="{Binding Player.ExtraMonsterZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="0" Grid.Column="4" Content="{Binding Player.ExtraMonsterZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <Border Grid.Row="0" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="p:ban" MouseLeftButtonUp="Pile_Click">
+                                <!-- Monster row -->
+                                <ContentControl Grid.Row="0" Grid.Column="0" Content="{Binding Player.FieldZone}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <ContentControl Grid.Row="0" Grid.Column="1" Content="{Binding Player.MainMonsterZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <ContentControl Grid.Row="0" Grid.Column="2" Content="{Binding Player.MainMonsterZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <ContentControl Grid.Row="0" Grid.Column="3" Content="{Binding Player.MainMonsterZones[2]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <ContentControl Grid.Row="0" Grid.Column="4" Content="{Binding Player.MainMonsterZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <ContentControl Grid.Row="0" Grid.Column="5" Content="{Binding Player.MainMonsterZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <Border Grid.Row="0" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="p:gy" MouseLeftButtonUp="Pile_Click">
+                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                        <TextBlock Text="GY" HorizontalAlignment="Center" FontSize="11"/>
+                                        <TextBlock Text="{Binding Player.Graveyard.Count}" HorizontalAlignment="Center" FontSize="20"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Row="0" Grid.Column="7" Style="{StaticResource PileBorder}" Tag="p:ban" MouseLeftButtonUp="Pile_Click">
                                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                                         <TextBlock Text="Banish" HorizontalAlignment="Center" FontSize="11"/>
                                         <TextBlock Text="{Binding Player.Banished.Count}" HorizontalAlignment="Center" FontSize="20"/>
                                     </StackPanel>
                                 </Border>
 
-                                <!-- Monster row -->
-                                <ContentControl Grid.Row="1" Grid.Column="0" Content="{Binding Player.FieldZone}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="1" Grid.Column="1" Content="{Binding Player.MainMonsterZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="1" Grid.Column="2" Content="{Binding Player.MainMonsterZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="1" Grid.Column="3" Content="{Binding Player.MainMonsterZones[2]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="1" Grid.Column="4" Content="{Binding Player.MainMonsterZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="1" Grid.Column="5" Content="{Binding Player.MainMonsterZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <Border Grid.Row="1" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="p:gy" MouseLeftButtonUp="Pile_Click">
-                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                        <TextBlock Text="GY" HorizontalAlignment="Center" FontSize="11"/>
-                                        <TextBlock Text="{Binding Player.Graveyard.Count}" HorizontalAlignment="Center" FontSize="20"/>
-                                    </StackPanel>
-                                </Border>
-
                                 <!-- S/T row -->
-                                <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource PileBorder}" Tag="p:extra" MouseLeftButtonUp="Pile_Click">
+                                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource PileBorder}" Tag="p:extra" MouseLeftButtonUp="Pile_Click">
                                     <Grid>
                                         <Control Template="{StaticResource CardBack}" Margin="6"/>
                                         <Border VerticalAlignment="Bottom" Background="#B0000000" CornerRadius="0,0,4,4">
@@ -435,12 +475,12 @@
                                         </Border>
                                     </Grid>
                                 </Border>
-                                <ContentControl Grid.Row="2" Grid.Column="1" Content="{Binding Player.SpellTrapZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="2" Grid.Column="2" Content="{Binding Player.SpellTrapZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="2" Grid.Column="3" Content="{Binding Player.SpellTrapZones[2]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="2" Grid.Column="4" Content="{Binding Player.SpellTrapZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <ContentControl Grid.Row="2" Grid.Column="5" Content="{Binding Player.SpellTrapZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <Border Grid.Row="2" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="p:deck" MouseLeftButtonUp="Pile_Click">
+                                <ContentControl Grid.Row="1" Grid.Column="1" Content="{Binding Player.SpellTrapZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <ContentControl Grid.Row="1" Grid.Column="2" Content="{Binding Player.SpellTrapZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <ContentControl Grid.Row="1" Grid.Column="3" Content="{Binding Player.SpellTrapZones[2]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <ContentControl Grid.Row="1" Grid.Column="4" Content="{Binding Player.SpellTrapZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <ContentControl Grid.Row="1" Grid.Column="5" Content="{Binding Player.SpellTrapZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
+                                <Border Grid.Row="1" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="p:deck" MouseLeftButtonUp="Pile_Click">
                                     <Border.ContextMenu>
                                         <ContextMenu>
                                             <MenuItem Header="Shuffle" Click="ShuffleDeck_Click"/>
@@ -475,43 +515,33 @@
                     </Grid>
                 </Border>
 
-                <!-- Player's hand -->
+                <!-- Player's hand + portrait & status-emote buttons (docked to the deck/GY side). -->
                 <Border Grid.Row="2" Background="#14FFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
                         CornerRadius="4" Margin="0,6,0,0" MinHeight="134">
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                        <ItemsControl ItemsSource="{Binding Player.Hand}" ItemTemplate="{StaticResource BoardCardTemplate}"
-                                      ItemsPanel="{StaticResource HorizontalHand}" Margin="6"/>
-                    </ScrollViewer>
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                    VerticalAlignment="Center" Margin="8,0">
+                            <ContentControl Content="{Binding Player}" ContentTemplate="{StaticResource PortraitTemplate}"
+                                            VerticalAlignment="Center"/>
+                            <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
+                                <ui:Button Content="🤔 Thinking" Tag="thinking" Click="Emote_Click"
+                                           HorizontalAlignment="Stretch" Margin="0,0,0,4" ToolTip="Thinking"/>
+                                <ui:Button Content="👍 OK" Tag="ok" Click="Emote_Click"
+                                           HorizontalAlignment="Stretch" Margin="0,0,0,4" ToolTip="OK / acknowledge"/>
+                                <ui:Button Content="✋ Respond" Tag="respond" Click="Emote_Click"
+                                           HorizontalAlignment="Stretch" ToolTip="I want to respond"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding Player.Hand}" ItemTemplate="{StaticResource BoardCardTemplate}"
+                                          ItemsPanel="{StaticResource HorizontalHand}" Margin="6"/>
+                        </ScrollViewer>
+                    </DockPanel>
                 </Border>
             </Grid>
 
-            <!-- Middle sidebar: opponent portrait (top), card inspector (fills),
-                 player portrait + status-emote buttons (bottom). -->
-            <Grid Grid.Column="1" Margin="16,0,0,0">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-
-                <ContentControl Grid.Row="0" Content="{Binding Opponent}"
-                                ContentTemplate="{StaticResource PortraitTemplate}" Margin="0,0,0,8"/>
-
-                <controls:CardPreview x:Name="Preview" Grid.Row="1"/>
-
-                <StackPanel Grid.Row="2" Margin="0,8,0,0">
-                    <ContentControl Content="{Binding Player}"
-                                    ContentTemplate="{StaticResource PortraitTemplate}"/>
-                    <UniformGrid Columns="3" Margin="0,6,0,0">
-                        <ui:Button Content="🤔 Think" Tag="thinking" Click="Emote_Click"
-                                   Margin="0,0,3,0" HorizontalAlignment="Stretch" ToolTip="Thinking"/>
-                        <ui:Button Content="👍 OK" Tag="ok" Click="Emote_Click"
-                                   Margin="3,0,3,0" HorizontalAlignment="Stretch" ToolTip="OK / acknowledge"/>
-                        <ui:Button Content="✋ Respond" Tag="respond" Click="Emote_Click"
-                                   Margin="3,0,0,0" HorizontalAlignment="Stretch" ToolTip="I want to respond"/>
-                    </UniformGrid>
-                </StackPanel>
-            </Grid>
+            <!-- Card inspector -->
+            <controls:CardPreview x:Name="Preview" Grid.Column="1" Margin="16,0,0,0"/>
 
             <!-- Right: timestamped action + chat log with a chat input. -->
             <Border Grid.Column="2" Margin="12,0,0,0" Background="#12FFFFFF"
