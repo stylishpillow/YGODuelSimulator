@@ -1,0 +1,203 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using YGODuelSimulator.Models.Duel;
+
+namespace YGODuelSimulator.Services.Net;
+
+/// <summary>Shared constants and JSON options for the peer-to-peer wire protocol.</summary>
+public static class NetProtocol
+{
+    /// <summary>Bumped whenever the message shapes change; peers must match.</summary>
+    public const int ProtocolVersion = 1;
+
+    public const int DiscoveryPort = 47772;   // UDP room beacons
+    public const int DefaultGamePort = 47771;  // TCP duel connection
+
+    /// <summary>Guards the receive loop against absurd frame sizes.</summary>
+    public const int MaxMessageBytes = 1 << 20; // 1 MB
+
+    public static readonly JsonSerializerOptions Json = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() },
+    };
+}
+
+public enum RpsChoice { Rock, Paper, Scissors }
+
+/// <summary>
+/// Base type for everything sent over the TCP link. Serialized polymorphically with a
+/// "type" discriminator so a single receive loop can deserialize any message.
+/// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+// Pre-game handshake / lobby
+[JsonDerivedType(typeof(HelloMessage), "hello")]
+[JsonDerivedType(typeof(DeckSelectedMessage), "deck")]
+[JsonDerivedType(typeof(RpsThrowMessage), "rps")]
+[JsonDerivedType(typeof(TurnChoiceMessage), "turnChoice")]
+[JsonDerivedType(typeof(GameStartMessage), "gameStart")]
+// In-duel (each describes a publicly visible change on the *sender's* side)
+[JsonDerivedType(typeof(SummonMessage), "summon")]
+[JsonDerivedType(typeof(SetCardMessage), "set")]
+[JsonDerivedType(typeof(RevealMessage), "reveal")]
+[JsonDerivedType(typeof(PositionChangeMessage), "position")]
+[JsonDerivedType(typeof(FieldToPileMessage), "fieldToPile")]
+[JsonDerivedType(typeof(HandToPileMessage), "handToPile")]
+[JsonDerivedType(typeof(DrawMessage), "draw")]
+[JsonDerivedType(typeof(LifePointsMessage), "lp")]
+[JsonDerivedType(typeof(TokenSummonMessage), "token")]
+[JsonDerivedType(typeof(CounterMessage), "counter")]
+[JsonDerivedType(typeof(ShuffleMessage), "shuffle")]
+[JsonDerivedType(typeof(AnnounceMessage), "announce")]
+[JsonDerivedType(typeof(RevealCardsMessage), "reveal")]
+[JsonDerivedType(typeof(TurnStateMessage), "turnState")]
+[JsonDerivedType(typeof(ChatMessage), "chat")]
+public abstract class NetMessage { }
+
+// --- Pre-game ---
+
+public sealed class HelloMessage : NetMessage
+{
+    public string Username { get; set; } = "";
+    public int ProtocolVersion { get; set; } = NetProtocol.ProtocolVersion;
+}
+
+public sealed class DeckSelectedMessage : NetMessage
+{
+    public string DeckName { get; set; } = "";
+    public List<long> MainIds { get; set; } = [];
+    public List<long> ExtraIds { get; set; } = [];
+}
+
+public sealed class RpsThrowMessage : NetMessage
+{
+    public RpsChoice Choice { get; set; }
+}
+
+/// <summary>Sent by the RPS winner to declare the turn order.</summary>
+public sealed class TurnChoiceMessage : NetMessage
+{
+    public bool WinnerGoesFirst { get; set; }
+}
+
+public sealed class GameStartMessage : NetMessage { }
+
+// --- In-duel: zone/index reference the sender's own side ---
+
+public sealed class SummonMessage : NetMessage
+{
+    public long CardId { get; set; }
+    public ZoneKind Zone { get; set; }
+    public int Index { get; set; }
+    public bool Defense { get; set; }
+    /// <summary>Where the card came from, so the opponent removes it from the right
+    /// place in their shadow (hand / deck / extra / GY / banished, or a field kind
+    /// when it's relocated between zones).</summary>
+    public ZoneKind From { get; set; } = ZoneKind.Hand;
+}
+
+/// <summary>A face-down card placed to a zone — no id, so the opponent only sees a back.</summary>
+public sealed class SetCardMessage : NetMessage
+{
+    public ZoneKind Zone { get; set; }
+    public int Index { get; set; }
+    public bool Defense { get; set; }
+    public ZoneKind From { get; set; } = ZoneKind.Hand;
+}
+
+/// <summary>A previously hidden card turns face-up, revealing its id.</summary>
+public sealed class RevealMessage : NetMessage
+{
+    public long CardId { get; set; }
+    public ZoneKind Zone { get; set; }
+    public int Index { get; set; }
+    public bool Defense { get; set; }
+}
+
+public sealed class PositionChangeMessage : NetMessage
+{
+    public ZoneKind Zone { get; set; }
+    public int Index { get; set; }
+    public bool FaceDown { get; set; }
+    public bool Defense { get; set; }
+}
+
+public sealed class FieldToPileMessage : NetMessage
+{
+    public ZoneKind Zone { get; set; }
+    public int Index { get; set; }
+    public ZoneKind Pile { get; set; }
+    /// <summary>Set when the moved card is/was public (e.g. a face-up card to the GY).</summary>
+    public long? CardId { get; set; }
+    public bool ToTop { get; set; }
+    /// <summary>A token simply vanishes off the field rather than entering a pile.</summary>
+    public bool IsToken { get; set; }
+}
+
+public sealed class HandToPileMessage : NetMessage
+{
+    public ZoneKind Pile { get; set; }
+    public long? CardId { get; set; }
+    public bool ToTop { get; set; }
+}
+
+public sealed class DrawMessage : NetMessage
+{
+    /// <summary>How many cards moved from the deck to the hand.</summary>
+    public int Count { get; set; } = 1;
+}
+
+public sealed class LifePointsMessage : NetMessage
+{
+    public int LifePoints { get; set; }
+}
+
+public sealed class TokenSummonMessage : NetMessage
+{
+    public ZoneKind Zone { get; set; }
+    public int Index { get; set; }
+    public bool Defense { get; set; }
+}
+
+public sealed class CounterMessage : NetMessage
+{
+    public ZoneKind Zone { get; set; }
+    public int Index { get; set; }
+    public int Counters { get; set; }
+}
+
+public sealed class ShuffleMessage : NetMessage { }
+
+/// <summary>Shows a set of the sender's cards to the opponent (single card or whole
+/// hand). An empty list closes the reveal viewer (an "unreveal").</summary>
+public sealed class RevealCardsMessage : NetMessage
+{
+    public List<long> CardIds { get; set; } = [];
+    public string Label { get; set; } = "reveals";
+}
+
+public sealed class AnnounceMessage : NetMessage
+{
+    public string Verb { get; set; } = "";
+    public ZoneKind Zone { get; set; }
+    public int Index { get; set; }
+}
+
+/// <summary>The full shared turn state after a change, so both clients stay in sync
+/// regardless of how it changed. <see cref="ActiveIsSender"/> is resolved to the
+/// receiver's own perspective (the sender is their opponent).</summary>
+public sealed class TurnStateMessage : NetMessage
+{
+    public int TurnNumber { get; set; }
+    public DuelPhaseWire Phase { get; set; }
+    public bool ActiveIsSender { get; set; }
+}
+
+public sealed class ChatMessage : NetMessage
+{
+    public string Text { get; set; } = "";
+}
+
+/// <summary>Wire copy of the phase enum so the protocol doesn't depend on the
+/// Services namespace layout (kept in sync with <c>DuelPhase</c>).</summary>
+public enum DuelPhaseWire { Draw, Standby, Main1, Battle, Main2, End }

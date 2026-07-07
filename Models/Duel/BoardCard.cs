@@ -20,6 +20,10 @@ namespace YGODuelSimulator.Models.Duel
 
         public BoardCard(Card card) => Card = card;
 
+        /// <summary>A face-down placeholder standing in for a hidden opponent card
+        /// (their deck, hand, or a set card) — renders as a plain card back.</summary>
+        public static BoardCard Hidden() => new(new Card { Name = "Card" }) { FaceDown = true };
+
         private int _counters;
         /// <summary>Free-floating counter tally the player can bump up/down for
         /// effects that "place counters" on a card. Purely a manual tracker.</summary>
@@ -82,6 +86,17 @@ namespace YGODuelSimulator.Models.Duel
         }
 
         public Visibility PointVisibility => _isPointed ? Visibility.Visible : Visibility.Collapsed;
+
+        private bool _isRevealed;
+        /// <summary>True while this (otherwise hidden) card is being shown to the
+        /// opponent, so its owner sees an "eye" marker on it.</summary>
+        public bool IsRevealed
+        {
+            get => _isRevealed;
+            set { _isRevealed = value; Raise(nameof(IsRevealed)); Raise(nameof(RevealVisibility)); }
+        }
+
+        public Visibility RevealVisibility => _isRevealed ? Visibility.Visible : Visibility.Collapsed;
 
         private BitmapImage? _image;
         public BitmapImage? Image

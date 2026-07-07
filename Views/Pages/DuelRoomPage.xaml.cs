@@ -5,8 +5,12 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Microsoft.EntityFrameworkCore;
+using YGODuelSimulator.Data;
+using YGODuelSimulator.Models;
 using YGODuelSimulator.Models.Duel;
 using YGODuelSimulator.Services;
+using YGODuelSimulator.Services.Net;
 
 namespace YGODuelSimulator.Views.Pages
 {
@@ -28,14 +32,33 @@ namespace YGODuelSimulator.Views.Pages
         private readonly DispatcherTimer _cueTimer;
         private BoardCard? _pointedCard;
 
+        // Networked play. Null / false while offline (hot-seat practice).
+        private DuelSession? _session;
+        private bool _networked;
+        private readonly CardImageService _images = new();
+        private readonly Random _rng = new();
+
+        // Cards currently revealed to the opponent (single-card reveals).
+        private readonly HashSet<BoardCard> _revealed = new();
+
         public DuelRoomPage()
         {
             InitializeComponent();
             DataContext = _state;
-            DeckPicker.ItemsSource = YdkFile.ListDeckNames();
+            var deckNames = YdkFile.ListDeckNames();
+            DeckPicker.ItemsSource = deckNames;
+            OnlineDeckPicker.ItemsSource = deckNames;
 
             _cueTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             _cueTimer.Tick += (_, _) => ClearCue();
+
+            // In a networked duel my own LP changes (buttons or the text box) mirror
+            // to the opponent's view of me.
+            _state.Player.PropertyChanged += (_, e) =>
+            {
+                if (_networked && e.PropertyName == nameof(PlayerBoard.LifePoints))
+                    _session?.Send(new LifePointsMessage { LifePoints = _state.Player.LifePoints });
+            };
         }
 
         // The navigation host places pages in a ScrollViewer, which hands the page an
@@ -63,6 +86,7 @@ namespace YGODuelSimulator.Views.Pages
         {
             if ((sender as FrameworkElement)?.DataContext is not BoardCard card) return;
             _state.Selected = card;
+            RevealButton.Content = card.IsRevealed ? "Unreveal" : "Reveal to opponent";
             ViewMenu.IsOpen = true;
             e.Handled = true;
         }
@@ -72,9 +96,13 @@ namespace YGODuelSimulator.Views.Pages
         {
             if ((sender as FrameworkElement)?.DataContext is not BoardCard card) return;
             _state.Selected = card;
+            // Online, you can only play your own cards.
+            if (_networked && _state.FindBoard(card) != _state.Player) { e.Handled = true; return; }
             CardActions.IsOpen = true;
             e.Handled = true;
         }
+
+        private bool IsMine(BoardCard card) => _state.FindBoard(card) == _state.Player;
 
         // --- View menu: inspect / declare / point ---
 
@@ -84,16 +112,60 @@ namespace YGODuelSimulator.Views.Pages
             ViewMenu.IsOpen = false;
         }
 
-        private void DeclareEffect_Click(object sender, RoutedEventArgs e)
+        private void DeclareEffect_Click(object sender, RoutedEventArgs e) => TableTalk("declares the effect of");
+        private void Point_Click(object sender, RoutedEventArgs e) => TableTalk("points to");
+
+        private void TableTalk(string verb)
         {
-            if (_state.Selected is { } c) { _state.Announce(c, "declares the effect of"); PointAt(c); }
+            if (_state.Selected is { } c)
+            {
+                _state.Announce(c, verb);
+                PointAt(c);
+                // Broadcast a cue about one of my own field cards so the opponent sees it.
+                if (_networked && IsMine(c) && LocateOnField(c) is { } loc)
+                    _session?.Send(new AnnounceMessage { Verb = verb, Zone = loc.kind, Index = loc.index });
+            }
             ViewMenu.IsOpen = false;
         }
 
-        private void Point_Click(object sender, RoutedEventArgs e)
+        // --- Reveal cards to the opponent ---
+
+        private void Reveal_Click(object sender, RoutedEventArgs e)
         {
-            if (_state.Selected is { } c) { _state.Announce(c, "points to"); PointAt(c); }
             ViewMenu.IsOpen = false;
+            if (_state.Selected is not { } c) return;
+            if (!_networked) { ResultText.Text = "Revealing is for online duels."; return; }
+            if (!IsMine(c)) return;
+
+            if (_revealed.Remove(c)) c.IsRevealed = false;
+            else { _revealed.Add(c); c.IsRevealed = true; }
+
+            _session?.Send(new RevealCardsMessage
+            {
+                CardIds = _revealed.Where(x => !x.IsToken).Select(x => x.Card.Id).ToList(),
+                Label = _revealed.Count == 1 ? "reveals a card" : "reveals cards",
+            });
+        }
+
+        private void RevealHand_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_networked) { ResultText.Text = "Revealing is for online duels."; return; }
+            var ids = _state.Player.Hand.Where(c => !c.IsToken).Select(c => c.Card.Id).ToList();
+            _session?.Send(new RevealCardsMessage { CardIds = ids, Label = "reveals their hand" });
+            ResultText.Text = "Revealed your hand to the opponent.";
+        }
+
+        /// <summary>Drops a card from the "revealed" set (e.g. when it leaves the hand).</summary>
+        private void Unreveal(BoardCard card)
+        {
+            if (!_revealed.Remove(card)) return;
+            card.IsRevealed = false;
+            if (_networked)
+                _session?.Send(new RevealCardsMessage
+                {
+                    CardIds = _revealed.Where(x => !x.IsToken).Select(x => x.Card.Id).ToList(),
+                    Label = _revealed.Count == 1 ? "reveals a card" : "reveals cards",
+                });
         }
 
         private void PointAt(BoardCard card)
@@ -120,13 +192,39 @@ namespace YGODuelSimulator.Views.Pages
             // Only meaningful while placing a card into a highlighted, empty zone.
             if (_pending is { } p && slot.IsTarget && _state.Selected is { } card)
             {
+                var emit = _networked && IsMine(card);
+                var from = emit ? SourceKindOf(card) : ZoneKind.Hand; // capture before the move
                 _state.MoveToSlot(card, slot);
                 card.FaceDown = p.faceDown;
                 card.Defense = p.defense;
+                if (emit) EmitPlacement(card, slot, p.faceDown, p.defense, from);
                 EndPlacement();
                 Deselect();
                 e.Handled = true;
             }
+        }
+
+        private void EmitPlacement(BoardCard card, ZoneSlot slot, bool faceDown, bool defense, ZoneKind from)
+        {
+            if (card.IsToken)
+                _session?.Send(new TokenSummonMessage { Zone = slot.Kind, Index = slot.Index, Defense = defense });
+            else if (faceDown)
+                _session?.Send(new SetCardMessage { Zone = slot.Kind, Index = slot.Index, Defense = defense, From = from });
+            else
+                _session?.Send(new SummonMessage { CardId = card.Card.Id, Zone = slot.Kind, Index = slot.Index, Defense = defense, From = from });
+        }
+
+        /// <summary>Where a card of mine currently lives, for the network source hint.</summary>
+        private ZoneKind SourceKindOf(BoardCard card)
+        {
+            if (LocateOnField(card) is { } loc) return loc.kind; // relocation between zones
+            var p = _state.Player;
+            if (p.Hand.Contains(card)) return ZoneKind.Hand;
+            if (p.Deck.Contains(card)) return ZoneKind.Deck;
+            if (p.ExtraDeck.Contains(card)) return ZoneKind.ExtraDeck;
+            if (p.Graveyard.Contains(card)) return ZoneKind.Graveyard;
+            if (p.Banished.Contains(card)) return ZoneKind.Banished;
+            return ZoneKind.Hand;
         }
 
         private void Playmat_Click(object sender, MouseButtonEventArgs e)
@@ -201,43 +299,86 @@ namespace YGODuelSimulator.Views.Pages
                 // A flip summon is always to attack (upright) — you can't flip a
                 // monster face-up into defense position.
                 if (!c.FaceDown) c.Defense = false;
+
+                if (_networked && IsMine(c) && LocateOnField(c) is { } loc)
+                {
+                    // Turning face-up reveals the card's identity to the opponent.
+                    if (!c.FaceDown)
+                        _session?.Send(new RevealMessage { CardId = c.Card.Id, Zone = loc.kind, Index = loc.index, Defense = c.Defense });
+                    else
+                        _session?.Send(new PositionChangeMessage { Zone = loc.kind, Index = loc.index, FaceDown = true, Defense = c.Defense });
+                }
             }
             CardActions.IsOpen = false;
         }
 
         private void SetPosition(bool faceDown, bool defense)
         {
-            if (_state.Selected is { } c) { c.FaceDown = faceDown; c.Defense = defense; }
+            if (_state.Selected is { } c)
+            {
+                c.FaceDown = faceDown;
+                c.Defense = defense;
+                if (_networked && IsMine(c) && LocateOnField(c) is { } loc)
+                    _session?.Send(new PositionChangeMessage { Zone = loc.kind, Index = loc.index, FaceDown = faceDown, Defense = defense });
+            }
             CardActions.IsOpen = false;
+        }
+
+        /// <summary>The (kind, index) of a card on the local player's field, or null.</summary>
+        private (ZoneKind kind, int index)? LocateOnField(BoardCard card)
+        {
+            foreach (var slot in _state.Player.AllSlots())
+                if (ReferenceEquals(slot.Card, card)) return (slot.Kind, slot.Index);
+            return null;
         }
 
         // --- Action menu: counters (stay open so several can be added) ---
 
-        private void AddCounter_Click(object sender, RoutedEventArgs e)
-        {
-            if (_state.Selected is { } c) c.Counters++;
-        }
+        private void AddCounter_Click(object sender, RoutedEventArgs e) => ChangeCounter(+1);
+        private void RemoveCounter_Click(object sender, RoutedEventArgs e) => ChangeCounter(-1);
 
-        private void RemoveCounter_Click(object sender, RoutedEventArgs e)
+        private void ChangeCounter(int delta)
         {
-            if (_state.Selected is { } c) c.Counters--;
+            if (_state.Selected is not { } c) return;
+            c.Counters += delta;
+            if (_networked && IsMine(c) && LocateOnField(c) is { } loc)
+                _session?.Send(new CounterMessage { Zone = loc.kind, Index = loc.index, Counters = c.Counters });
         }
 
         // --- Action menu: move to a pile (act now) ---
 
-        private void SelToHand_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Hand);
-        private void SelToGrave_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Graveyard);
-        private void SelToBanish_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Banished);
-        private void SelToDeckTop_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck, toTop: true);
-        private void SelToDeckBottom_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck);
-        private void SelToExtra_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.ExtraDeck);
+        private void SelToHand_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Hand, ZoneKind.Hand);
+        private void SelToGrave_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Graveyard, ZoneKind.Graveyard);
+        private void SelToBanish_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Banished, ZoneKind.Banished);
+        private void SelToDeckTop_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck, ZoneKind.Deck, toTop: true);
+        private void SelToDeckBottom_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck, ZoneKind.Deck);
+        private void SelToExtra_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.ExtraDeck, ZoneKind.ExtraDeck);
 
-        private void MoveSelected(Func<PlayerBoard, ObservableCollection<BoardCard>> pick, bool toTop = false)
+        private void MoveSelected(Func<PlayerBoard, ObservableCollection<BoardCard>> pick, ZoneKind pile, bool toTop = false)
         {
             if (_state.Selected is not { } card) return;
+            Unreveal(card);
             var board = _state.FindBoard(card);
+            var mine = board == _state.Player;
+
+            // Capture where it came from before the move, for the network message.
+            var fromField = mine ? LocateOnField(card) : null;
+            var fromHand = mine && _state.Player.Hand.Contains(card);
+            // A public destination (GY/Banished) reveals the card's identity.
+            long? publicId = !card.IsToken && (pile is ZoneKind.Graveyard or ZoneKind.Banished) ? card.Card.Id : null;
+            var isToken = card.IsToken;
+
             ResetPosition(card);
             _state.MoveToPile(card, pick(board), toTop);
+
+            if (_networked && mine)
+            {
+                if (fromField is { } f)
+                    _session?.Send(new FieldToPileMessage { Zone = f.kind, Index = f.index, Pile = pile, CardId = publicId, ToTop = toTop, IsToken = isToken });
+                else if (fromHand)
+                    _session?.Send(new HandToPileMessage { Pile = pile, CardId = publicId, ToTop = toTop });
+            }
+
             EndPlacement();
             Deselect();
         }
@@ -274,10 +415,36 @@ namespace YGODuelSimulator.Views.Pages
             e.Handled = true;
         }
 
+        // Right-click a deck pile → Shuffle. Online you can only shuffle your own deck.
+        private void ShuffleDeck_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as MenuItem)?.Parent is not ContextMenu cm) return;
+            if (cm.PlacementTarget is not FrameworkElement { Tag: string tag }) return;
+
+            var isOpponent = tag.StartsWith("o:");
+            if (_networked && isOpponent) return;
+
+            var board = isOpponent ? _state.Opponent : _state.Player;
+            board.Shuffle();
+            ResultText.Text = "Shuffled deck.";
+            if (_networked && board == _state.Player) _session?.Send(new ShuffleMessage());
+        }
+
         // --- Turn / phase ---
 
-        private void NextPhase_Click(object sender, RoutedEventArgs e) => _state.NextPhase();
-        private void EndTurn_Click(object sender, RoutedEventArgs e) => _state.EndTurn();
+        private void NextPhase_Click(object sender, RoutedEventArgs e) { _state.NextPhase(); EmitTurnState(); }
+        private void EndTurn_Click(object sender, RoutedEventArgs e) { _state.EndTurn(); EmitTurnState(); }
+
+        private void EmitTurnState()
+        {
+            if (!_networked) return;
+            _session?.Send(new TurnStateMessage
+            {
+                TurnNumber = _state.TurnNumber,
+                Phase = (DuelPhaseWire)(int)_state.Phase,
+                ActiveIsSender = _state.ActiveSide == PlayerSide.Player,
+            });
+        }
 
         // --- Toolbar: decks, draw, shuffle, tokens ---
 
@@ -303,33 +470,408 @@ namespace YGODuelSimulator.Views.Pages
             }
         }
 
+        // Online, you only act on your own (Player) board; offline, on the active one.
+        private PlayerBoard SelfBoard => _networked ? _state.Player : _state.ActiveBoard;
+
         private void Draw_Click(object sender, RoutedEventArgs e)
         {
-            if (_state.ActiveBoard.Draw() is null) ResultText.Text = "Deck is empty.";
+            if (SelfBoard.Draw() is null) { ResultText.Text = "Deck is empty."; return; }
+            if (_networked) _session?.Send(new DrawMessage { Count = 1 });
         }
 
         private void Shuffle_Click(object sender, RoutedEventArgs e)
         {
-            _state.ActiveBoard.Shuffle();
+            SelfBoard.Shuffle();
             ResultText.Text = "Shuffled.";
+            if (_networked) _session?.Send(new ShuffleMessage());
         }
 
         private void CreateToken_Click(object sender, RoutedEventArgs e)
         {
-            _state.CreateToken(_state.ActiveBoard);
+            // A token appears in hand; the opponent only sees it once it's summoned.
+            _state.CreateToken(SelfBoard);
             ResultText.Text = "Token added to hand.";
         }
 
-        // --- Life points ---
+        private void DiscardRandom_Click(object sender, RoutedEventArgs e)
+        {
+            var board = SelfBoard;
+            if (board.Hand.Count == 0) { ResultText.Text = "Hand is empty."; return; }
+
+            var card = board.Hand[_rng.Next(board.Hand.Count)];
+            var name = card.IsToken ? "a token" : card.Name;
+            var isToken = card.IsToken;
+            Unreveal(card);
+            ResetPosition(card);
+            _state.MoveToPile(card, board.Graveyard);
+            // Discarding to the GY is public, so the opponent sees which card it was.
+            if (_networked && !isToken)
+                _session?.Send(new HandToPileMessage { Pile = ZoneKind.Graveyard, CardId = card.Card.Id });
+            ResultText.Text = $"Discarded {name}.";
+        }
+
+        // --- Life points (Player LP mirrors via Player.PropertyChanged) ---
 
         private void PlayerLpMinus1000_Click(object sender, RoutedEventArgs e) => _state.Player.LifePoints -= 1000;
         private void PlayerLpMinus500_Click(object sender, RoutedEventArgs e) => _state.Player.LifePoints -= 500;
-        private void OppLpMinus1000_Click(object sender, RoutedEventArgs e) => _state.Opponent.LifePoints -= 1000;
-        private void OppLpMinus500_Click(object sender, RoutedEventArgs e) => _state.Opponent.LifePoints -= 500;
+        private void OppLpMinus1000_Click(object sender, RoutedEventArgs e) { if (!_networked) _state.Opponent.LifePoints -= 1000; }
+        private void OppLpMinus500_Click(object sender, RoutedEventArgs e) { if (!_networked) _state.Opponent.LifePoints -= 500; }
 
         // --- Dice ---
 
         private void Die_Click(object sender, RoutedEventArgs e) => ResultText.Text = $"Rolled a {_state.RollDie()}.";
         private void Coin_Click(object sender, RoutedEventArgs e) => ResultText.Text = $"Coin: {(_state.FlipCoin() ? "Heads" : "Tails")}.";
+
+        // ===== Pre-game overlay: practice vs. online, lobby, deck, RPS, order =====
+
+        private void Practice_Click(object sender, RoutedEventArgs e)
+        {
+            EndSession();
+            _networked = false;
+            Overlay.Visibility = Visibility.Collapsed;
+            ResultText.Text = "Offline practice — load a deck to begin.";
+        }
+
+        private void PlayOnline_Click(object sender, RoutedEventArgs e)
+        {
+            EndSession();
+            var name = Session.CurrentUser?.Username ?? "Player";
+            _session = new DuelSession(Dispatcher, name);
+            _session.Changed += RefreshOverlay;
+            _session.GameStarting += OnGameStarting;
+            _session.DuelMessage += OnDuelMessage;
+            _session.EnterLobby();
+            RefreshOverlay();
+        }
+
+        private void CreateRoom_Click(object sender, RoutedEventArgs e) => _session?.Host();
+
+        private void JoinRoom_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is DiscoveredRoom room) _session?.Join(room);
+        }
+
+        private void BackToEntry_Click(object sender, RoutedEventArgs e)
+        {
+            EndSession();
+            ShowOnlyPanel(EntryPanel);
+        }
+
+        private void ReadyDeck_Click(object sender, RoutedEventArgs e)
+        {
+            if (_session is null) return;
+            if (OnlineDeckPicker.SelectedItem is not string name)
+            {
+                DeckStatusText.Text = "Pick a deck first.";
+                return;
+            }
+            var deck = YdkFile.Load(name);
+            _session.SelectDeck(new DeckSelectedMessage
+            {
+                DeckName = name,
+                MainIds = deck.Main.ToList(),
+                ExtraIds = deck.Extra.ToList(),
+            });
+            ReadyButton.IsEnabled = false;
+            OnlineDeckPicker.IsEnabled = false;
+        }
+
+        private void RpsRock_Click(object sender, RoutedEventArgs e) => _session?.ThrowRps(RpsChoice.Rock);
+        private void RpsPaper_Click(object sender, RoutedEventArgs e) => _session?.ThrowRps(RpsChoice.Paper);
+        private void RpsScissors_Click(object sender, RoutedEventArgs e) => _session?.ThrowRps(RpsChoice.Scissors);
+
+        private void GoFirst_Click(object sender, RoutedEventArgs e) => _session?.ChooseOrder(true);
+        private void GoSecond_Click(object sender, RoutedEventArgs e) => _session?.ChooseOrder(false);
+
+        private void RefreshOverlay()
+        {
+            if (_session is null) return;
+            switch (_session.Phase)
+            {
+                case MatchPhase.Lobby:
+                    ShowOnlyPanel(LobbyPanel);
+                    RoomsList.ItemsSource = _session.Rooms;
+                    NoRoomsText.Visibility = _session.Rooms.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+                    break;
+                case MatchPhase.Connecting:
+                    ShowOnlyPanel(ConnectingPanel);
+                    ConnectingText.Text = _session.StatusMessage ?? "Connecting…";
+                    break;
+                case MatchPhase.DeckSelect:
+                    ShowOnlyPanel(DeckPanel);
+                    DeckOppText.Text = _session.OpponentName is { } n ? $"Connected to {n}." : "Connected.";
+                    DeckStatusText.Text =
+                        $"You: {(_session.LocalDeckReady ? "ready" : "choosing…")}\n" +
+                        $"{_session.OpponentName ?? "Opponent"}: {(_session.OpponentDeckReady ? "ready" : "choosing…")}";
+                    break;
+                case MatchPhase.Rps:
+                    ShowOnlyPanel(RpsPanel);
+                    RpsButtons.IsEnabled = !_session.LocalRpsThrown;
+                    RpsStatusText.Text = _session.RpsMessage ??
+                        (_session.LocalRpsThrown ? "Waiting for opponent…" : "Make your choice.");
+                    break;
+                case MatchPhase.ChooseOrder:
+                    ShowOnlyPanel(OrderPanel);
+                    OrderText.Text = _session.RpsMessage ?? "";
+                    OrderButtons.Visibility = _session.LocalWonRps == true ? Visibility.Visible : Visibility.Collapsed;
+                    break;
+                case MatchPhase.Disconnected:
+                    ShowOnlyPanel(DisconnectedPanel);
+                    DisconnectedText.Text = _session.StatusMessage ?? "Disconnected.";
+                    break;
+                case MatchPhase.InDuel:
+                    Overlay.Visibility = Visibility.Collapsed;
+                    break;
+            }
+        }
+
+        private void ShowOnlyPanel(FrameworkElement panel)
+        {
+            Overlay.Visibility = Visibility.Visible;
+            foreach (var p in new FrameworkElement[]
+                { EntryPanel, LobbyPanel, ConnectingPanel, DeckPanel, RpsPanel, OrderPanel, DisconnectedPanel })
+                p.Visibility = ReferenceEquals(p, panel) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private async void OnGameStarting(GameStartInfo info)
+        {
+            _networked = true;
+
+            // Set up the opponent shadow and turn state synchronously first, so any
+            // early inbound message applies to a ready board (not one reset later).
+            SetupOpponentShadow(
+                deckCount: info.RemoteDeck.MainIds.Count - 5,
+                handCount: 5,
+                extraCount: info.RemoteDeck.ExtraIds.Count);
+            _state.TurnNumber = 1;
+            _state.Phase = DuelPhase.Main1;
+            _state.ActiveSide = info.LocalGoesFirst ? PlayerSide.Player : PlayerSide.Opponent;
+
+            // Online, decks and the opponent's LP aren't manually editable.
+            SetOfflineControlsEnabled(false);
+            Overlay.Visibility = Visibility.Collapsed;
+            ResultText.Text = info.LocalGoesFirst
+                ? "You go first."
+                : $"{_session?.OpponentName ?? "Opponent"} goes first.";
+
+            // Local player is always the bottom ("Player") board; load their real deck.
+            var myDeck = new Deck { Name = info.LocalDeck.DeckName };
+            myDeck.Main.AddRange(info.LocalDeck.MainIds);
+            myDeck.Extra.AddRange(info.LocalDeck.ExtraIds);
+            await _state.Player.LoadDeckAsync(myDeck);
+        }
+
+        private void SetupOpponentShadow(int deckCount, int handCount, int extraCount)
+        {
+            var o = _state.Opponent;
+            o.Hand.Clear(); o.Deck.Clear(); o.ExtraDeck.Clear(); o.Graveyard.Clear(); o.Banished.Clear();
+            foreach (var slot in o.AllSlots()) slot.Card = null;
+            for (var i = 0; i < Math.Max(0, handCount); i++) o.Hand.Add(BoardCard.Hidden());
+            for (var i = 0; i < Math.Max(0, deckCount); i++) o.Deck.Add(BoardCard.Hidden());
+            for (var i = 0; i < Math.Max(0, extraCount); i++) o.ExtraDeck.Add(BoardCard.Hidden());
+            o.LifePoints = 8000;
+        }
+
+        // --- Applying the opponent's actions to their shadow (top) board ---
+
+        private readonly Queue<NetMessage> _incoming = new();
+        private bool _processing;
+
+        // Queue inbound messages and apply them strictly in order (each may await a
+        // card lookup), so nothing is applied out of sequence.
+        private void OnDuelMessage(NetMessage message)
+        {
+            _incoming.Enqueue(message);
+            if (!_processing) _ = ProcessIncomingAsync();
+        }
+
+        private async Task ProcessIncomingAsync()
+        {
+            _processing = true;
+            try
+            {
+                while (_incoming.Count > 0) await ApplyRemoteAsync(_incoming.Dequeue());
+            }
+            finally { _processing = false; }
+        }
+
+        private async Task ApplyRemoteAsync(NetMessage message)
+        {
+            var o = _state.Opponent; // the sender is my opponent
+            switch (message)
+            {
+                case SummonMessage s:
+                    RemoveFromOppSource(s.From, s.CardId);
+                    PlaceInZone(o, s.Zone, s.Index, await BuildCardAsync(s.CardId, defense: s.Defense));
+                    break;
+
+                case SetCardMessage set:
+                    RemoveFromOppSource(set.From, null);
+                    PlaceInZone(o, set.Zone, set.Index, new BoardCard(new Card { Name = "Card" }) { FaceDown = true, Defense = set.Defense });
+                    break;
+
+                case RevealMessage r:
+                    if (o.Slot(r.Zone, r.Index) is { } rslot)
+                        rslot.Card = await BuildCardAsync(r.CardId, defense: r.Defense);
+                    break;
+
+                case PositionChangeMessage pc:
+                    if (o.Slot(pc.Zone, pc.Index)?.Card is { } pcard) { pcard.FaceDown = pc.FaceDown; pcard.Defense = pc.Defense; }
+                    break;
+
+                case FieldToPileMessage f:
+                    var moved = o.Slot(f.Zone, f.Index)?.Card;
+                    if (o.Slot(f.Zone, f.Index) is { } fslot) fslot.Card = null;
+                    if (!f.IsToken)
+                    {
+                        var dest = f.CardId is { } fid ? await BuildCardAsync(fid) : (moved ?? BoardCard.Hidden());
+                        if (f.CardId is null) { dest.FaceDown = true; dest.Defense = false; }
+                        AddToPile(o, f.Pile, dest, f.ToTop);
+                    }
+                    break;
+
+                case HandToPileMessage h:
+                    RemoveOneHidden(o.Hand);
+                    var hdest = h.CardId is { } hid ? await BuildCardAsync(hid) : BoardCard.Hidden();
+                    AddToPile(o, h.Pile, hdest, h.ToTop);
+                    break;
+
+                case DrawMessage d:
+                    for (var i = 0; i < d.Count; i++)
+                    {
+                        if (o.Deck.Count > 0) o.Deck.RemoveAt(0);
+                        o.Hand.Add(BoardCard.Hidden());
+                    }
+                    break;
+
+                case LifePointsMessage lp:
+                    o.LifePoints = lp.LifePoints;
+                    break;
+
+                case TokenSummonMessage t:
+                    PlaceInZone(o, t.Zone, t.Index, new BoardCard(new Card { Name = "Token" }) { IsToken = true, Defense = t.Defense });
+                    break;
+
+                case CounterMessage c:
+                    if (o.Slot(c.Zone, c.Index)?.Card is { } ccard) ccard.Counters = c.Counters;
+                    break;
+
+                case AnnounceMessage a:
+                    if (o.Slot(a.Zone, a.Index)?.Card is { } acard) { _state.Announce(acard, a.Verb); PointAt(acard); }
+                    break;
+
+                case RevealCardsMessage rc:
+                    if (rc.CardIds.Count == 0)
+                    {
+                        RevealViewer.IsOpen = false;
+                    }
+                    else
+                    {
+                        var revealed = new List<BoardCard>();
+                        foreach (var id in rc.CardIds) revealed.Add(await BuildCardAsync(id));
+                        RevealViewerTitle.Text = $"{_session?.OpponentName ?? "Opponent"} {rc.Label}";
+                        RevealViewerItems.ItemsSource = revealed;
+                        RevealViewer.IsOpen = true;
+                    }
+                    break;
+
+                case TurnStateMessage ts:
+                    _state.TurnNumber = ts.TurnNumber;
+                    _state.Phase = (DuelPhase)(int)ts.Phase;
+                    _state.ActiveSide = ts.ActiveIsSender ? PlayerSide.Opponent : PlayerSide.Player;
+                    break;
+
+                case ShuffleMessage:
+                case ChatMessage:
+                    break;
+            }
+        }
+
+        private ZoneSlot? FindOppSlotById(long cardId)
+        {
+            foreach (var slot in _state.Opponent.AllSlots())
+                if (slot.Card is { IsToken: false } bc && bc.Card.Id == cardId) return slot;
+            return null;
+        }
+
+        /// <summary>Removes the card being placed from wherever it came from in the
+        /// opponent shadow, using the sender's source hint.</summary>
+        private void RemoveFromOppSource(ZoneKind from, long? cardId)
+        {
+            var o = _state.Opponent;
+            switch (from)
+            {
+                case ZoneKind.MainMonster or ZoneKind.ExtraMonster or ZoneKind.SpellTrap or ZoneKind.Field:
+                    if (cardId is { } id && FindOppSlotById(id) is { } slot) slot.Card = null; // relocation
+                    break;
+                case ZoneKind.Hand: RemoveOneHidden(o.Hand); break;
+                case ZoneKind.Deck: RemoveOneHidden(o.Deck); break;
+                case ZoneKind.ExtraDeck: RemoveOneHidden(o.ExtraDeck); break;
+                case ZoneKind.Graveyard: RemoveByIdOrLast(o.Graveyard, cardId); break;
+                case ZoneKind.Banished: RemoveByIdOrLast(o.Banished, cardId); break;
+            }
+        }
+
+        private static void RemoveByIdOrLast(ObservableCollection<BoardCard> pile, long? cardId)
+        {
+            if (cardId is { } id)
+            {
+                var match = pile.FirstOrDefault(c => !c.IsToken && c.Card.Id == id);
+                if (match is not null) { pile.Remove(match); return; }
+            }
+            if (pile.Count > 0) pile.RemoveAt(pile.Count - 1);
+        }
+
+        private static void PlaceInZone(PlayerBoard board, ZoneKind kind, int index, BoardCard card)
+        {
+            if (board.Slot(kind, index) is { } slot) slot.Card = card;
+        }
+
+        private static void RemoveOneHidden(ObservableCollection<BoardCard> hand)
+        {
+            if (hand.Count > 0) hand.RemoveAt(hand.Count - 1);
+        }
+
+        private static void AddToPile(PlayerBoard board, ZoneKind pile, BoardCard card, bool toTop)
+        {
+            if (board.Pile(pile) is not { } p) return;
+            if (toTop) p.Insert(0, card); else p.Add(card);
+        }
+
+        /// <summary>Builds a face-up board card for a passcode using the local card DB
+        /// (both players share the same seeded database) and its cached image.</summary>
+        private async Task<BoardCard> BuildCardAsync(long cardId, bool defense = false)
+        {
+            Card? card;
+            await using (var db = new AppDbContext())
+                card = await db.Cards.Include(c => c.Images).FirstOrDefaultAsync(c => c.Id == cardId);
+            card ??= new Card { Id = cardId, Name = $"#{cardId}" };
+
+            var bc = new BoardCard(card) { Defense = defense };
+            try { bc.Image = await ImageLoading.GetThumbnailAsync(_images, card); }
+            catch { /* image best-effort */ }
+            return bc;
+        }
+
+        private void SetOfflineControlsEnabled(bool enabled)
+        {
+            LoadPlayerBtn.IsEnabled = enabled;
+            LoadOpponentBtn.IsEnabled = enabled;
+            DeckPicker.IsEnabled = enabled;
+            OppLpBox.IsEnabled = enabled;
+            OppLpMinus1000Btn.IsEnabled = enabled;
+            OppLpMinus500Btn.IsEnabled = enabled;
+        }
+
+        private void EndSession()
+        {
+            _session?.Dispose();
+            _session = null;
+            _networked = false;
+            _incoming.Clear();
+            _revealed.Clear();
+            RevealViewer.IsOpen = false;
+            SetOfflineControlsEnabled(true);
+        }
     }
 }
