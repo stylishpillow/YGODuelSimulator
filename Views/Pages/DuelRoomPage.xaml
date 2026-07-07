@@ -693,11 +693,36 @@
                     <!-- Entry -->
                     <StackPanel x:Name="EntryPanel">
                         <TextBlock Text="Duel Room" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Play a local practice game, or duel someone on your network."
+                        <TextBlock Text="Duel someone over the Internet, play across your local network, or practice offline."
                                    Opacity="0.7" TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,20"/>
-                        <ui:Button Content="Play online (LAN)" Appearance="Primary" HorizontalAlignment="Stretch"
-                                   Margin="0,0,0,10" Click="PlayOnline_Click"/>
+                        <ui:Button Content="Play online" Appearance="Primary" HorizontalAlignment="Stretch"
+                                   Margin="0,0,0,10" Click="PlayInternet_Click"/>
+                        <ui:Button Content="Play on your network (LAN)" HorizontalAlignment="Stretch"
+                                   Margin="0,0,0,10" Click="PlayLan_Click"/>
                         <ui:Button Content="Practice offline" HorizontalAlignment="Stretch" Click="Practice_Click"/>
+                    </StackPanel>
+
+                    <!-- Online (Internet, via room code) -->
+                    <StackPanel x:Name="InternetPanel" Visibility="Collapsed">
+                        <TextBlock Text="Play online" FontSize="20" FontWeight="Bold"/>
+                        <TextBlock Text="Host a game to get a room code, or enter the code your opponent shared."
+                                   Opacity="0.7" TextWrapping="Wrap" Margin="0,4,0,14"/>
+                        <ui:Button Content="Host a game" Appearance="Primary" HorizontalAlignment="Stretch"
+                                   Click="HostInternet_Click"/>
+                        <TextBlock Text="or join with a code" Opacity="0.6" Margin="0,16,0,6"
+                                   FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ui:TextBox x:Name="RoomCodeBox" Grid.Column="0" PlaceholderText="Room code"
+                                        CharacterCasing="Upper" MaxLength="12" Margin="0,0,8,0"
+                                        KeyDown="RoomCodeBox_KeyDown"/>
+                            <ui:Button x:Name="JoinCodeButton" Grid.Column="1" Content="Join"
+                                       Click="JoinInternet_Click"/>
+                        </Grid>
+                        <ui:Button Content="Back" HorizontalAlignment="Left" Margin="0,16,0,0" Click="BackToEntry_Click"/>
                     </StackPanel>
 
                     <!-- Lobby -->

@@ -16,11 +16,14 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
 {
     private readonly Dispatcher _dispatcher;
     private readonly LanDiscovery _discovery;
-    private P2PConnection? _connection;
+    private IDuelConnection? _connection;
     private CancellationTokenSource? _connectCts;
 
     public string LocalName { get; }
     public bool IsHost { get; private set; }
+
+    /// <summary>The room code this client is hosting online, shown so the host can share it.</summary>
+    public string? RoomCode { get; private set; }
 
     private MatchPhase _phase = MatchPhase.Idle;
     public MatchPhase Phase
@@ -121,7 +124,68 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
         }
     }
 
-    private void OnConnected(P2PConnection conn)
+    // --- Online (cross-network via the cloud relay) ---
+
+    /// <summary>Host an Internet game: mints a room code and waits for a joiner on the relay.</summary>
+    public async void HostOnline()
+    {
+        IsHost = true;
+        RoomCode = GenerateRoomCode();
+        Raise(nameof(RoomCode));
+        Phase = MatchPhase.Connecting;
+        SetStatus($"Room code: {RoomCode}\nShare it with your opponent — waiting for them to join…");
+
+        _connectCts = new CancellationTokenSource();
+        try
+        {
+            var conn = await RelayConnection.HostAsync(RoomCode, _dispatcher, _connectCts.Token);
+            OnConnected(conn);
+        }
+        catch (OperationCanceledException) { /* cancelled by Back */ }
+        catch (Exception ex)
+        {
+            Fail($"Could not host online: {ex.Message}");
+        }
+    }
+
+    /// <summary>Join an Internet game by the code the host shared.</summary>
+    public async void JoinOnline(string code)
+    {
+        code = (code ?? "").Trim().ToUpperInvariant();
+        if (code.Length == 0)
+        {
+            Fail("Enter the room code your opponent shared.");
+            return;
+        }
+
+        IsHost = false;
+        Phase = MatchPhase.Connecting;
+        SetStatus($"Joining room {code}…");
+
+        _connectCts = new CancellationTokenSource();
+        try
+        {
+            var conn = await RelayConnection.JoinAsync(code, _dispatcher, _connectCts.Token);
+            OnConnected(conn);
+        }
+        catch (OperationCanceledException) { /* cancelled by Back */ }
+        catch (Exception ex)
+        {
+            Fail($"Could not join: {ex.Message}");
+        }
+    }
+
+    /// <summary>A short, human-shareable code using unambiguous characters (no 0/O/1/I).</summary>
+    private static string GenerateRoomCode()
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        var chars = new char[4];
+        for (var i = 0; i < chars.Length; i++)
+            chars[i] = alphabet[Random.Shared.Next(alphabet.Length)];
+        return new string(chars);
+    }
+
+    private void OnConnected(IDuelConnection conn)
     {
         _connection = conn;
         conn.MessageReceived += OnMessage;

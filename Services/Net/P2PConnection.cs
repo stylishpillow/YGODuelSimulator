@@ -11,7 +11,7 @@ namespace YGODuelSimulator.Services.Net;
 /// length followed by UTF-8 JSON. A background loop reads messages and raises
 /// <see cref="MessageReceived"/> / <see cref="Disconnected"/> on the UI thread.
 /// </summary>
-public sealed class P2PConnection : IDisposable
+public sealed class P2PConnection : IDuelConnection
 {
     private readonly Dispatcher _dispatcher;
     private readonly SemaphoreSlim _sendLock = new(1, 1);

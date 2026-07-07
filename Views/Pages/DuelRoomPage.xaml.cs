@@ -910,15 +910,40 @@ namespace YGODuelSimulator.Views.Pages
             ResultText.Text = "Offline practice — load a deck to begin.";
         }
 
-        private void PlayOnline_Click(object sender, RoutedEventArgs e)
+        private DuelSession CreateSession()
         {
             EndSession();
             var name = Session.CurrentUser?.Username ?? "Player";
-            _session = new DuelSession(Dispatcher, name);
-            _session.Changed += RefreshOverlay;
-            _session.GameStarting += OnGameStarting;
-            _session.DuelMessage += OnDuelMessage;
-            _session.EnterLobby();
+            var session = new DuelSession(Dispatcher, name);
+            session.Changed += RefreshOverlay;
+            session.GameStarting += OnGameStarting;
+            session.DuelMessage += OnDuelMessage;
+            _session = session;
+            return session;
+        }
+
+        // Cross-network play over the cloud relay (room codes).
+        private void PlayInternet_Click(object sender, RoutedEventArgs e)
+        {
+            CreateSession();
+            RoomCodeBox.Text = "";
+            ShowOnlyPanel(InternetPanel);
+        }
+
+        private void HostInternet_Click(object sender, RoutedEventArgs e) => _session?.HostOnline();
+
+        private void JoinInternet_Click(object sender, RoutedEventArgs e) => _session?.JoinOnline(RoomCodeBox.Text);
+
+        private void RoomCodeBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) _session?.JoinOnline(RoomCodeBox.Text);
+        }
+
+        // Same-network play via UDP discovery.
+        private void PlayLan_Click(object sender, RoutedEventArgs e)
+        {
+            CreateSession();
+            _session!.EnterLobby();
             RefreshOverlay();
         }
 
@@ -1007,7 +1032,7 @@ namespace YGODuelSimulator.Views.Pages
         {
             Overlay.Visibility = Visibility.Visible;
             foreach (var p in new FrameworkElement[]
-                { EntryPanel, LobbyPanel, ConnectingPanel, DeckPanel, RpsPanel, OrderPanel, DisconnectedPanel })
+                { EntryPanel, InternetPanel, LobbyPanel, ConnectingPanel, DeckPanel, RpsPanel, OrderPanel, DisconnectedPanel })
                 p.Visibility = ReferenceEquals(p, panel) ? Visibility.Visible : Visibility.Collapsed;
         }
 

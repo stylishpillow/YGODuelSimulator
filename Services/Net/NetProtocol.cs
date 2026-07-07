@@ -13,6 +13,10 @@ public static class NetProtocol
     public const int DiscoveryPort = 47772;   // UDP room beacons
     public const int DefaultGamePort = 47771;  // TCP duel connection
 
+    /// <summary>Cloudflare Worker relay for cross-network (Internet) play. Peers open
+    /// <c>{RelayBaseUrl}/room/{code}?role=host|join</c>; see the <c>relay/</c> folder.</summary>
+    public const string RelayBaseUrl = "wss://ygo-duel-relay.eelco-hansma-mail.workers.dev";
+
     /// <summary>Guards the receive loop against absurd frame sizes.</summary>
     public const int MaxMessageBytes = 1 << 20; // 1 MB
 
