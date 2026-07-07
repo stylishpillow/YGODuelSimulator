@@ -167,6 +167,55 @@
         <ItemsPanelTemplate x:Key="HorizontalHand">
             <StackPanel Orientation="Horizontal"/>
         </ItemsPanelTemplate>
+
+        <!-- A player portrait: initial-avatar, name, LP, and a status emote badge /
+             label the opponent can see (bound to a PlayerBoard). -->
+        <DataTemplate x:Key="PortraitTemplate">
+            <Border Background="#18FFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                    CornerRadius="8" Padding="8">
+                <StackPanel Orientation="Horizontal">
+                    <Grid Width="46" Height="46">
+                        <Ellipse Fill="#2E6BB0" Stroke="#66BFE8FF" StrokeThickness="1.5"/>
+                        <TextBlock Text="{Binding Initial}" Foreground="White" FontSize="20" FontWeight="Bold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <!-- Emote glyph badge over the avatar -->
+                        <Border Visibility="{Binding EmoteVisibility}" Width="24" Height="24" CornerRadius="12"
+                                Background="#F01C2A3A" BorderBrush="#88BFE8FF" BorderThickness="1"
+                                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-4,-4">
+                            <TextBlock Text="{Binding EmoteGlyph}" FontSize="13"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </Grid>
+                    <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
+                        <TextBlock Text="{Binding DisplayName}" Foreground="White" FontWeight="SemiBold"
+                                   FontSize="14" TextTrimming="CharacterEllipsis" MaxWidth="130"/>
+                        <TextBlock Foreground="#AACFE8FF" FontSize="12">
+                            <Run Text="LP "/><Run Text="{Binding LifePoints}"/>
+                        </TextBlock>
+                        <TextBlock Text="{Binding EmoteLabel}" Foreground="#FFD27A" FontSize="11"
+                                   FontWeight="SemiBold" Visibility="{Binding EmoteVisibility}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- One line of the game log: dim timestamp + text; chat lines are brighter. -->
+        <DataTemplate x:Key="LogEntryTemplate">
+            <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,1" Foreground="#C6D2DC">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsChat}" Value="True">
+                                <Setter Property="Foreground" Value="#EAF2FF"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+                <Run Text="{Binding Time, Mode=OneWay}" FontSize="10" Foreground="#6FAFC4D4"/>
+                <Run Text="  "/><Run Text="{Binding Text, Mode=OneWay}"/>
+            </TextBlock>
+        </DataTemplate>
     </Page.Resources>
 
     <Grid x:Name="RootGrid" Margin="16,0,16,0" VerticalAlignment="Top">
@@ -225,11 +274,9 @@
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="230"/>
+                <ColumnDefinition Width="220"/>
+                <ColumnDefinition Width="250"/>
             </Grid.ColumnDefinitions>
-
-            <!-- Inspector (right, always visible) -->
-            <controls:CardPreview x:Name="Preview" Grid.Column="1" Margin="16,0,0,0"/>
 
             <!-- Field -->
             <Grid Grid.Column="0">
@@ -437,6 +484,64 @@
                     </ScrollViewer>
                 </Border>
             </Grid>
+
+            <!-- Middle sidebar: opponent portrait (top), card inspector (fills),
+                 player portrait + status-emote buttons (bottom). -->
+            <Grid Grid.Column="1" Margin="16,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <ContentControl Grid.Row="0" Content="{Binding Opponent}"
+                                ContentTemplate="{StaticResource PortraitTemplate}" Margin="0,0,0,8"/>
+
+                <controls:CardPreview x:Name="Preview" Grid.Row="1"/>
+
+                <StackPanel Grid.Row="2" Margin="0,8,0,0">
+                    <ContentControl Content="{Binding Player}"
+                                    ContentTemplate="{StaticResource PortraitTemplate}"/>
+                    <UniformGrid Columns="3" Margin="0,6,0,0">
+                        <ui:Button Content="🤔 Think" Tag="thinking" Click="Emote_Click"
+                                   Margin="0,0,3,0" HorizontalAlignment="Stretch" ToolTip="Thinking"/>
+                        <ui:Button Content="👍 OK" Tag="ok" Click="Emote_Click"
+                                   Margin="3,0,3,0" HorizontalAlignment="Stretch" ToolTip="OK / acknowledge"/>
+                        <ui:Button Content="✋ Respond" Tag="respond" Click="Emote_Click"
+                                   Margin="3,0,0,0" HorizontalAlignment="Stretch" ToolTip="I want to respond"/>
+                    </UniformGrid>
+                </StackPanel>
+            </Grid>
+
+            <!-- Right: timestamped action + chat log with a chat input. -->
+            <Border Grid.Column="2" Margin="12,0,0,0" Background="#12FFFFFF"
+                    BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="8">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="Game log" Foreground="#AACFE8FF"
+                               FontWeight="SemiBold" FontSize="13" Margin="2,0,0,6"/>
+
+                    <ScrollViewer x:Name="LogScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="LogItems" ItemsSource="{Binding LogEntries}"
+                                      ItemTemplate="{StaticResource LogEntryTemplate}"/>
+                    </ScrollViewer>
+
+                    <Grid Grid.Row="2" Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox x:Name="ChatInput" Grid.Column="0" PlaceholderText="Type a message…"
+                                    KeyDown="ChatInput_KeyDown"/>
+                        <ui:Button Grid.Column="1" Content="Send" Margin="4,0,0,0" Click="SendChat_Click"/>
+                    </Grid>
+                </Grid>
+            </Border>
         </Grid>
 
         <!-- View menu: opens at the cursor on LEFT-click — the table-talk actions of

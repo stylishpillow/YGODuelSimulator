@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Windows;
 using Microsoft.EntityFrameworkCore;
 using YGODuelSimulator.Data;
 using YGODuelSimulator.Models;
@@ -36,6 +37,52 @@ namespace YGODuelSimulator.Models.Duel
             set { _lifePoints = value; Raise(nameof(LifePoints)); }
         }
 
+        // --- Portrait: display name + a transient status emote the opponent can see ---
+
+        private string _displayName;
+        /// <summary>The name shown on this player's portrait (their username online).</summary>
+        public string DisplayName
+        {
+            get => _displayName;
+            set { _displayName = value; Raise(nameof(DisplayName)); Raise(nameof(Initial)); }
+        }
+
+        /// <summary>A single-letter avatar fallback drawn on the portrait.</summary>
+        public string Initial =>
+            string.IsNullOrWhiteSpace(_displayName) ? "?" : _displayName.Trim()[..1].ToUpperInvariant();
+
+        private string? _emote;
+        /// <summary>The current status emote key ("thinking", "ok", "respond"), or null.</summary>
+        public string? Emote
+        {
+            get => _emote;
+            set
+            {
+                _emote = string.IsNullOrEmpty(value) ? null : value;
+                Raise(nameof(Emote)); Raise(nameof(EmoteGlyph));
+                Raise(nameof(EmoteLabel)); Raise(nameof(EmoteVisibility));
+            }
+        }
+
+        public string EmoteGlyph => _emote switch
+        {
+            "thinking" => "🤔",
+            "ok" => "👍",
+            "respond" => "✋",
+            _ => "",
+        };
+
+        public string EmoteLabel => _emote switch
+        {
+            "thinking" => "Thinking…",
+            "ok" => "OK",
+            "respond" => "Wants to respond",
+            _ => "",
+        };
+
+        public Visibility EmoteVisibility =>
+            string.IsNullOrEmpty(_emote) ? Visibility.Collapsed : Visibility.Visible;
+
         private readonly Random _rng;
         private readonly CardImageService _images;
 
@@ -44,6 +91,7 @@ namespace YGODuelSimulator.Models.Duel
             Side = side;
             _rng = rng;
             _images = images;
+            _displayName = side == PlayerSide.Player ? "Player" : "Opponent";
             MainMonsterZones = MakeZones(ZoneKind.MainMonster, 5);
             ExtraMonsterZones = MakeZones(ZoneKind.ExtraMonster, 2);
             SpellTrapZones = MakeZones(ZoneKind.SpellTrap, 5);
