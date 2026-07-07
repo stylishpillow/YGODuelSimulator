@@ -9,12 +9,19 @@ namespace YGODuelSimulator.Models.Duel
     }
 
     /// <summary>A single-card zone on the board (a monster/spell-trap/field/extra
-    /// monster zone). Holds at most one card and knows which zone it is so drop
-    /// handling can target it.</summary>
+    /// monster zone). Holds at most one card and knows which zone it is, and which
+    /// player owns it, so placement can target it.</summary>
     public class ZoneSlot : INotifyPropertyChanged
     {
         public ZoneKind Kind { get; }
         public int Index { get; }
+
+        /// <summary>The board this zone belongs to (set when the board builds it).</summary>
+        public PlayerBoard Owner { get; }
+
+        /// <summary>The leftmost and rightmost Spell/Trap zones double as Pendulum
+        /// Zones (rulebook p.5).</summary>
+        public bool IsPendulumZone => Kind == ZoneKind.SpellTrap && (Index == 0 || Index == 4);
 
         /// <summary>Faint watermark text shown on the empty zone so it's obvious
         /// what kind of zone it is.</summary>
@@ -22,15 +29,16 @@ namespace YGODuelSimulator.Models.Duel
         {
             ZoneKind.MainMonster => "MONSTER",
             ZoneKind.ExtraMonster => "EXTRA",
-            ZoneKind.SpellTrap => "S / T",
+            ZoneKind.SpellTrap => IsPendulumZone ? "S / T\nPEND" : "S / T",
             ZoneKind.Field => "FIELD",
             _ => "",
         };
 
-        public ZoneSlot(ZoneKind kind, int index)
+        public ZoneSlot(ZoneKind kind, int index, PlayerBoard owner)
         {
             Kind = kind;
             Index = index;
+            Owner = owner;
         }
 
         private BoardCard? _card;

@@ -1,34 +1,61 @@
 using System.Collections.ObjectModel;
-using Microsoft.EntityFrameworkCore;
-using YGODuelSimulator.Data;
+using System.ComponentModel;
+using System.Windows;
 using YGODuelSimulator.Models;
 using YGODuelSimulator.Models.Duel;
 
 namespace YGODuelSimulator.Services
 {
+    /// <summary>The phases of a turn (rulebook p.34).</summary>
+    public enum DuelPhase { Draw, Standby, Main1, Battle, Main2, End }
+
     /// <summary>
-    /// The board state for a single-player manual duel: the piles, the fixed zones,
-    /// life points, and the operations to move cards around, draw, shuffle, and
-    /// roll a die / flip a coin. No rules are enforced.
+    /// A two-player manual duel: two <see cref="PlayerBoard"/> halves plus the
+    /// shared turn/phase tracker and the card-selection and move operations that
+    /// can cross between the two boards. No rules are enforced — the phase tracker
+    /// is a guide, not a referee.
     /// </summary>
-    public class DuelState
+    public class DuelState : INotifyPropertyChanged
     {
-        public ObservableCollection<BoardCard> Hand { get; } = [];
-        public ObservableCollection<BoardCard> Deck { get; } = [];
-        public ObservableCollection<BoardCard> ExtraDeck { get; } = [];
-        public ObservableCollection<BoardCard> Graveyard { get; } = [];
-        public ObservableCollection<BoardCard> Banished { get; } = [];
+        private readonly Random _rng = new();
+        private readonly CardImageService _images = new();
 
-        public IReadOnlyList<ZoneSlot> MainMonsterZones { get; }
-        public IReadOnlyList<ZoneSlot> ExtraMonsterZones { get; }
-        public IReadOnlyList<ZoneSlot> SpellTrapZones { get; }
-        public ZoneSlot FieldZone { get; }
+        public PlayerBoard Player { get; }
+        public PlayerBoard Opponent { get; }
 
-        public int LifePoints { get; set; } = 8000;
+        public DuelState()
+        {
+            Player = new PlayerBoard(PlayerSide.Player, _rng, _images);
+            Opponent = new PlayerBoard(PlayerSide.Opponent, _rng, _images);
+        }
+
+        public PlayerBoard BoardFor(PlayerSide side) =>
+            side == PlayerSide.Player ? Player : Opponent;
+
+        // --- Table talk: pointing at / declaring on a card (two-player cues) ---
+
+        private string? _announcement;
+        /// <summary>A transient banner such as "Player declares the effect of …".</summary>
+        public string? Announcement
+        {
+            get => _announcement;
+            set { _announcement = value; Raise(nameof(Announcement)); Raise(nameof(AnnouncementVisibility)); }
+        }
+
+        public Visibility AnnouncementVisibility =>
+            string.IsNullOrEmpty(_announcement) ? Visibility.Collapsed : Visibility.Visible;
+
+        /// <summary>Sets the banner to "&lt;owner&gt; &lt;verb&gt; &lt;card&gt;".</summary>
+        public void Announce(BoardCard card, string verb)
+        {
+            var who = FindBoard(card).Side == PlayerSide.Player ? "Player" : "Opponent";
+            Announcement = $"{who} {verb} {card.Name}";
+        }
+
+        // --- Selection ---
 
         private BoardCard? _selected;
-        /// <summary>The card the player has clicked to act on. Setting this keeps the
-        /// previously selected card's highlight in sync.</summary>
+        /// <summary>The card the player has clicked to act on.</summary>
         public BoardCard? Selected
         {
             get => _selected;
@@ -41,75 +68,61 @@ namespace YGODuelSimulator.Services
             }
         }
 
-        private readonly Random _rng = new();
-        private readonly CardImageService _images = new();
+        // --- Turn / phase tracking (guidance only) ---
 
-        public DuelState()
+        private int _turnNumber = 1;
+        public int TurnNumber
         {
-            MainMonsterZones = MakeZones(ZoneKind.MainMonster, 5);
-            ExtraMonsterZones = MakeZones(ZoneKind.ExtraMonster, 2);
-            SpellTrapZones = MakeZones(ZoneKind.SpellTrap, 5);
-            FieldZone = new ZoneSlot(ZoneKind.Field, 0);
+            get => _turnNumber;
+            set { _turnNumber = value; Raise(nameof(TurnNumber)); Raise(nameof(TurnSummary)); }
         }
 
-        private static List<ZoneSlot> MakeZones(ZoneKind kind, int count) =>
-            Enumerable.Range(0, count).Select(i => new ZoneSlot(kind, i)).ToList();
-
-        /// <summary>Loads a deck: fetch the cards, fill the Deck and Extra Deck piles,
-        /// shuffle, clear the board, and draw an opening hand of five.</summary>
-        public async Task LoadDeckAsync(Deck deck)
+        private PlayerSide _activeSide = PlayerSide.Player;
+        public PlayerSide ActiveSide
         {
-            var ids = deck.Main.Concat(deck.Extra).Distinct().ToList();
-            Dictionary<long, Card> cards;
-            await using (var db = new AppDbContext())
-            {
-                cards = await db.Cards.Include(c => c.Images)
-                    .Where(c => ids.Contains(c.Id))
-                    .ToDictionaryAsync(c => c.Id);
-            }
-
-            Deck.Clear(); ExtraDeck.Clear(); Hand.Clear(); Graveyard.Clear(); Banished.Clear();
-            foreach (var slot in AllSlots()) slot.Card = null;
-
-            foreach (var id in deck.Main) if (cards.TryGetValue(id, out var c)) AddNew(Deck, c);
-            foreach (var id in deck.Extra) if (cards.TryGetValue(id, out var c)) AddNew(ExtraDeck, c);
-
-            Shuffle();
-            for (var i = 0; i < 5; i++) Draw();
+            get => _activeSide;
+            set { _activeSide = value; Raise(nameof(ActiveSide)); Raise(nameof(TurnSummary)); }
         }
 
-        private void AddNew(ObservableCollection<BoardCard> pile, Card card)
+        private DuelPhase _phase = DuelPhase.Main1;
+        public DuelPhase Phase
         {
-            var bc = new BoardCard(card);
-            pile.Add(bc);
-            _ = LoadImageAsync(bc);
+            get => _phase;
+            set { _phase = value; Raise(nameof(Phase)); Raise(nameof(TurnSummary)); }
         }
 
-        private async Task LoadImageAsync(BoardCard bc)
+        public PlayerBoard ActiveBoard => BoardFor(ActiveSide);
+
+        /// <summary>A short "Turn 3 — Player — Main Phase 1" line for the toolbar.</summary>
+        public string TurnSummary =>
+            $"Turn {TurnNumber} · {(ActiveSide == PlayerSide.Player ? "Player" : "Opponent")} · {PhaseName(Phase)}";
+
+        private static string PhaseName(DuelPhase p) => p switch
         {
-            try { bc.Image = await ImageLoading.GetThumbnailAsync(_images, bc.Card); }
-            catch { /* board still works without the thumbnail */ }
+            DuelPhase.Draw => "Draw Phase",
+            DuelPhase.Standby => "Standby Phase",
+            DuelPhase.Main1 => "Main Phase 1",
+            DuelPhase.Battle => "Battle Phase",
+            DuelPhase.Main2 => "Main Phase 2",
+            _ => "End Phase",
+        };
+
+        /// <summary>Advances to the next phase, wrapping End → the next player's turn.</summary>
+        public void NextPhase()
+        {
+            if (Phase == DuelPhase.End) { EndTurn(); return; }
+            Phase = (DuelPhase)((int)Phase + 1);
         }
 
-        public void Shuffle()
+        /// <summary>Passes the turn to the other player and resets to their Draw Phase.</summary>
+        public void EndTurn()
         {
-            for (var i = Deck.Count - 1; i > 0; i--)
-            {
-                var j = _rng.Next(i + 1);
-                (Deck[i], Deck[j]) = (Deck[j], Deck[i]);
-            }
+            ActiveSide = ActiveSide == PlayerSide.Player ? PlayerSide.Opponent : PlayerSide.Player;
+            TurnNumber++;
+            Phase = DuelPhase.Draw;
         }
 
-        public BoardCard? Draw()
-        {
-            if (Deck.Count == 0) return null;
-            var card = Deck[0];
-            Deck.RemoveAt(0);
-            card.FaceDown = false;
-            card.Defense = false;
-            Hand.Add(card);
-            return card;
-        }
+        // --- Moves (may cross between boards) ---
 
         /// <summary>Places a card into a single-card zone if it's empty.</summary>
         public bool MoveToSlot(BoardCard card, ZoneSlot slot)
@@ -123,36 +136,73 @@ namespace YGODuelSimulator.Services
         public void MoveToPile(BoardCard card, ObservableCollection<BoardCard> pile, bool toTop = false)
         {
             RemoveFromCurrent(card);
+            // Tokens cease to exist anywhere but the field (rulebook p.49).
+            if (card.IsToken) return;
             if (toTop) pile.Insert(0, card);
             else pile.Add(card);
         }
 
         private void RemoveFromCurrent(BoardCard card)
         {
-            if (Hand.Remove(card) || Deck.Remove(card) || ExtraDeck.Remove(card)
-                || Graveyard.Remove(card) || Banished.Remove(card)) return;
+            foreach (var board in Boards())
+            {
+                if (board.Hand.Remove(card) || board.Deck.Remove(card) || board.ExtraDeck.Remove(card)
+                    || board.Graveyard.Remove(card) || board.Banished.Remove(card)) return;
 
-            foreach (var slot in AllSlots())
-                if (ReferenceEquals(slot.Card, card)) { slot.Card = null; return; }
+                foreach (var slot in board.AllSlots())
+                    if (ReferenceEquals(slot.Card, card)) { slot.Card = null; return; }
+            }
         }
 
-        private IEnumerable<ZoneSlot> AllSlots() =>
-            MainMonsterZones.Concat(ExtraMonsterZones).Concat(SpellTrapZones).Append(FieldZone);
+        // --- Placement highlighting ---
 
-        /// <summary>Marks every empty zone of the given kinds as a valid placement
-        /// target so the board can highlight where the selected card may go.</summary>
-        public void HighlightTargets(params ZoneKind[] kinds)
+        /// <summary>Marks every empty zone of the given kinds, on the given board, as a
+        /// valid placement target so the board can highlight where the card may go.</summary>
+        public void HighlightTargets(PlayerBoard board, params ZoneKind[] kinds)
         {
-            foreach (var slot in AllSlots())
+            ClearHighlights();
+            foreach (var slot in board.AllSlots())
                 slot.IsTarget = slot.IsEmpty && kinds.Contains(slot.Kind);
         }
 
         public void ClearHighlights()
         {
-            foreach (var slot in AllSlots()) slot.IsTarget = false;
+            foreach (var board in Boards())
+                foreach (var slot in board.AllSlots())
+                    slot.IsTarget = false;
+        }
+
+        /// <summary>The board that currently holds the card, or the active board if it
+        /// can't be found (e.g. a card in hand belongs to its owner's board).</summary>
+        public PlayerBoard FindBoard(BoardCard card)
+        {
+            foreach (var board in Boards())
+            {
+                if (board.Hand.Contains(card) || board.Deck.Contains(card) || board.ExtraDeck.Contains(card)
+                    || board.Graveyard.Contains(card) || board.Banished.Contains(card)) return board;
+                foreach (var slot in board.AllSlots())
+                    if (ReferenceEquals(slot.Card, card)) return board;
+            }
+            return ActiveBoard;
+        }
+
+        private IEnumerable<PlayerBoard> Boards() { yield return Player; yield return Opponent; }
+
+        // --- Tokens & dice ---
+
+        /// <summary>Creates a Monster Token on the given board's hand (the player then
+        /// summons it to a zone). Tokens are treated as Normal Monsters (rulebook p.49).</summary>
+        public BoardCard CreateToken(PlayerBoard board)
+        {
+            var token = new BoardCard(new Card { Id = 0, Name = "Token" }) { IsToken = true };
+            board.Hand.Add(token);
+            return token;
         }
 
         public int RollDie() => _rng.Next(1, 7);
         public bool FlipCoin() => _rng.Next(2) == 0;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 }

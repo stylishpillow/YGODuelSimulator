@@ -1,63 +1,124 @@
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using YGODuelSimulator.Models.Duel;
 using YGODuelSimulator.Services;
 
 namespace YGODuelSimulator.Views.Pages
 {
     /// <summary>
-    /// Local manual duel playfield, driven the Dueling Book way: click a card to
-    /// select it and open an action menu, then (for placement actions) click the
-    /// highlighted destination zone. Nothing is rule-enforced.
+    /// Local two-player manual duel playfield, driven the Dueling Book way:
+    /// left-click a card to select / point at it, right-click for the action menu,
+    /// then (for placement actions) left-click the highlighted destination zone.
+    /// A turn/phase tracker guides play but nothing is rule-enforced.
     /// </summary>
     public partial class DuelRoomPage : Page
     {
         private readonly DuelState _state = new();
 
-        // A placement armed from the action menu: the face/position to apply and
-        // which zone kinds are valid destinations. Null when nothing is pending.
-        private (bool faceDown, bool defense, ZoneKind[] kinds)? _pending;
+        // A placement armed from the action menu: the face/position to apply once a
+        // highlighted zone is clicked. Null when nothing is pending.
+        private (bool faceDown, bool defense)? _pending;
+
+        // A "point"/"declare" cue clears itself after a moment.
+        private readonly DispatcherTimer _cueTimer;
+        private BoardCard? _pointedCard;
 
         public DuelRoomPage()
         {
             InitializeComponent();
             DataContext = _state;
             DeckPicker.ItemsSource = YdkFile.ListDeckNames();
-            UpdateLp();
+
+            _cueTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            _cueTimer.Tick += (_, _) => ClearCue();
         }
 
-        // --- Selection & action menu ---
+        // The navigation host places pages in a ScrollViewer, which hands the page an
+        // unbounded height — so the field's Viewbox would render at full natural size
+        // and overflow the top. Cap the page to the visible viewport so the Viewbox
+        // scales the whole board to fit.
+        private void Page_Loaded(object sender, RoutedEventArgs e)
+        {
+            for (DependencyObject? d = this; d is not null; d = VisualTreeHelper.GetParent(d))
+            {
+                if (d is ScrollViewer sv)
+                {
+                    RootGrid.SetBinding(MaxHeightProperty,
+                        new Binding(nameof(ScrollViewer.ViewportHeight)) { Source = sv });
+                    break;
+                }
+            }
+        }
 
-        // Left-click just selects / points at a card (the game is two-player, so a
-        // click is "I'm looking at this one") and shows it in the inspector.
+        // --- Selection & menus ---
+
+        // Left-click selects the card and opens the "view" menu (inspect / declare /
+        // point) — the table-talk actions of a two-player game.
         private void Card_Click(object sender, MouseButtonEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not BoardCard card) return;
-
             _state.Selected = card;
-            Preview.Show(card.Card);
+            ViewMenu.IsOpen = true;
             e.Handled = true;
         }
 
-        // Right-click selects the card and opens the action menu at the cursor.
+        // Right-click selects the card and opens the play-action menu at the cursor.
         private void Card_RightClick(object sender, MouseButtonEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not BoardCard card) return;
-
             _state.Selected = card;
-            Preview.Show(card.Card);
             CardActions.IsOpen = true;
             e.Handled = true;
+        }
+
+        // --- View menu: inspect / declare / point ---
+
+        private void Inspect_Click(object sender, RoutedEventArgs e)
+        {
+            if (_state.Selected is { IsToken: false } c) Preview.Show(c.Card);
+            ViewMenu.IsOpen = false;
+        }
+
+        private void DeclareEffect_Click(object sender, RoutedEventArgs e)
+        {
+            if (_state.Selected is { } c) { _state.Announce(c, "declares the effect of"); PointAt(c); }
+            ViewMenu.IsOpen = false;
+        }
+
+        private void Point_Click(object sender, RoutedEventArgs e)
+        {
+            if (_state.Selected is { } c) { _state.Announce(c, "points to"); PointAt(c); }
+            ViewMenu.IsOpen = false;
+        }
+
+        private void PointAt(BoardCard card)
+        {
+            if (_pointedCard is { } prev) prev.IsPointed = false;
+            _pointedCard = card;
+            card.IsPointed = true;
+            _cueTimer.Stop();
+            _cueTimer.Start();
+        }
+
+        private void ClearCue()
+        {
+            _cueTimer.Stop();
+            if (_pointedCard is { } c) c.IsPointed = false;
+            _pointedCard = null;
+            _state.Announcement = null;
         }
 
         private void Zone_Click(object sender, MouseButtonEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not ZoneSlot slot) return;
 
-            // Only meaningful while placing a card into a matching, empty zone.
-            if (_pending is { } p && slot.IsEmpty && p.kinds.Contains(slot.Kind) &&
-                _state.Selected is { } card)
+            // Only meaningful while placing a card into a highlighted, empty zone.
+            if (_pending is { } p && slot.IsTarget && _state.Selected is { } card)
             {
                 _state.MoveToSlot(card, slot);
                 card.FaceDown = p.faceDown;
@@ -70,8 +131,7 @@ namespace YGODuelSimulator.Views.Pages
 
         private void Playmat_Click(object sender, MouseButtonEventArgs e)
         {
-            // A click that reached the playmat background (not a card or zone)
-            // cancels the current selection / pending placement.
+            // A click that reached the playmat background cancels the selection.
             EndPlacement();
             Deselect();
         }
@@ -84,9 +144,13 @@ namespace YGODuelSimulator.Views.Pages
         private void BeginPlacement(bool faceDown, bool defense, params ZoneKind[] kinds)
         {
             CardActions.IsOpen = false;
-            if (_state.Selected is null) return;
-            _pending = (faceDown, defense, kinds);
-            _state.HighlightTargets(kinds);
+            // Close the pile viewer so the board is visible and clickable for the drop
+            // (e.g. Special Summon chosen from the Deck/GY list).
+            PileViewer.IsOpen = false;
+            if (_state.Selected is not { } card) return;
+            _pending = (faceDown, defense);
+            // Summon into the zones of whichever board owns the selected card.
+            _state.HighlightTargets(_state.FindBoard(card), kinds);
         }
 
         private void EndPlacement()
@@ -147,44 +211,35 @@ namespace YGODuelSimulator.Views.Pages
             CardActions.IsOpen = false;
         }
 
-        // --- Action menu: move to a pile (act now) ---
+        // --- Action menu: counters (stay open so several can be added) ---
 
-        private void SelToHand_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Hand);
-        private void SelToGrave_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Graveyard);
-        private void SelToBanish_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Banished);
-        private void SelToDeckTop_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Deck, toTop: true);
-        private void SelToDeckBottom_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Deck);
-        private void SelToExtra_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.ExtraDeck);
-
-        private void MoveSelected(System.Collections.ObjectModel.ObservableCollection<BoardCard> pile, bool toTop = false)
+        private void AddCounter_Click(object sender, RoutedEventArgs e)
         {
-            if (_state.Selected is not { } card) return;
-            ResetPosition(card);
-            _state.MoveToPile(card, pile, toTop);
-            EndPlacement();
-            Deselect();
+            if (_state.Selected is { } c) c.Counters++;
         }
 
-        // --- Pile viewer ---
-
-        private void Pile_Click(object sender, MouseButtonEventArgs e)
+        private void RemoveCounter_Click(object sender, RoutedEventArgs e)
         {
-            if ((sender as FrameworkElement)?.Tag is not string tag) return;
+            if (_state.Selected is { } c) c.Counters--;
+        }
 
-            (string? title, System.Collections.IEnumerable? source) = tag switch
-            {
-                "deck" => ("Deck", _state.Deck),
-                "extra" => ("Extra Deck", _state.ExtraDeck),
-                "gy" => ("Graveyard", _state.Graveyard),
-                "ban" => ("Banished", _state.Banished),
-                _ => (null, null),
-            };
-            if (title is null) return;
+        // --- Action menu: move to a pile (act now) ---
 
-            PileViewerTitle.Text = title;
-            PileViewerItems.ItemsSource = source;
-            PileViewer.IsOpen = true;
-            e.Handled = true;
+        private void SelToHand_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Hand);
+        private void SelToGrave_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Graveyard);
+        private void SelToBanish_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Banished);
+        private void SelToDeckTop_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck, toTop: true);
+        private void SelToDeckBottom_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck);
+        private void SelToExtra_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.ExtraDeck);
+
+        private void MoveSelected(Func<PlayerBoard, ObservableCollection<BoardCard>> pick, bool toTop = false)
+        {
+            if (_state.Selected is not { } card) return;
+            var board = _state.FindBoard(card);
+            ResetPosition(card);
+            _state.MoveToPile(card, pick(board), toTop);
+            EndPlacement();
+            Deselect();
         }
 
         private static void ResetPosition(BoardCard card)
@@ -193,9 +248,43 @@ namespace YGODuelSimulator.Views.Pages
             card.Defense = false;
         }
 
-        // --- Toolbar ---
+        // --- Pile viewer ---
 
-        private async void Load_Click(object sender, RoutedEventArgs e)
+        private void Pile_Click(object sender, MouseButtonEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not string tag) return;
+
+            var parts = tag.Split(':');
+            var board = parts[0] == "o" ? _state.Opponent : _state.Player;
+            var who = parts[0] == "o" ? "Opponent" : "Player";
+
+            (string? title, System.Collections.IEnumerable? source) = parts[1] switch
+            {
+                "deck" => ("Deck", board.Deck),
+                "extra" => ("Extra Deck", board.ExtraDeck),
+                "gy" => ("Graveyard", board.Graveyard),
+                "ban" => ("Banished", board.Banished),
+                _ => (null, null),
+            };
+            if (title is null) return;
+
+            PileViewerTitle.Text = $"{who} · {title}";
+            PileViewerItems.ItemsSource = source;
+            PileViewer.IsOpen = true;
+            e.Handled = true;
+        }
+
+        // --- Turn / phase ---
+
+        private void NextPhase_Click(object sender, RoutedEventArgs e) => _state.NextPhase();
+        private void EndTurn_Click(object sender, RoutedEventArgs e) => _state.EndTurn();
+
+        // --- Toolbar: decks, draw, shuffle, tokens ---
+
+        private void LoadPlayer_Click(object sender, RoutedEventArgs e) => _ = LoadDeckAsync(_state.Player);
+        private void LoadOpponent_Click(object sender, RoutedEventArgs e) => _ = LoadDeckAsync(_state.Opponent);
+
+        private async Task LoadDeckAsync(PlayerBoard board)
         {
             if (DeckPicker.SelectedItem is not string name)
             {
@@ -204,9 +293,9 @@ namespace YGODuelSimulator.Views.Pages
             }
             try
             {
-                await _state.LoadDeckAsync(YdkFile.Load(name));
-                UpdateLp();
-                ResultText.Text = $"Loaded \"{name}\".";
+                await board.LoadDeckAsync(YdkFile.Load(name));
+                var who = board.Side == PlayerSide.Player ? "Player" : "Opponent";
+                ResultText.Text = $"Loaded \"{name}\" for {who}.";
             }
             catch (Exception ex)
             {
@@ -216,28 +305,29 @@ namespace YGODuelSimulator.Views.Pages
 
         private void Draw_Click(object sender, RoutedEventArgs e)
         {
-            if (_state.Draw() is null) ResultText.Text = "Deck is empty.";
+            if (_state.ActiveBoard.Draw() is null) ResultText.Text = "Deck is empty.";
         }
 
         private void Shuffle_Click(object sender, RoutedEventArgs e)
         {
-            _state.Shuffle();
+            _state.ActiveBoard.Shuffle();
             ResultText.Text = "Shuffled.";
         }
 
-        private void LpMinus1000_Click(object sender, RoutedEventArgs e) => AdjustLp(-1000);
-        private void LpMinus500_Click(object sender, RoutedEventArgs e) => AdjustLp(-500);
-        private void LpReset_Click(object sender, RoutedEventArgs e) { _state.LifePoints = 8000; UpdateLp(); }
-
-        private void Lp_KeyDown(object sender, KeyEventArgs e)
+        private void CreateToken_Click(object sender, RoutedEventArgs e)
         {
-            if (e.Key != Key.Enter) return;
-            if (int.TryParse(LpBox.Text, out var lp)) _state.LifePoints = lp;
-            UpdateLp();
+            _state.CreateToken(_state.ActiveBoard);
+            ResultText.Text = "Token added to hand.";
         }
 
-        private void AdjustLp(int delta) { _state.LifePoints += delta; UpdateLp(); }
-        private void UpdateLp() => LpBox.Text = _state.LifePoints.ToString();
+        // --- Life points ---
+
+        private void PlayerLpMinus1000_Click(object sender, RoutedEventArgs e) => _state.Player.LifePoints -= 1000;
+        private void PlayerLpMinus500_Click(object sender, RoutedEventArgs e) => _state.Player.LifePoints -= 500;
+        private void OppLpMinus1000_Click(object sender, RoutedEventArgs e) => _state.Opponent.LifePoints -= 1000;
+        private void OppLpMinus500_Click(object sender, RoutedEventArgs e) => _state.Opponent.LifePoints -= 500;
+
+        // --- Dice ---
 
         private void Die_Click(object sender, RoutedEventArgs e) => ResultText.Text = $"Rolled a {_state.RollDie()}.";
         private void Coin_Click(object sender, RoutedEventArgs e) => ResultText.Text = $"Coin: {(_state.FlipCoin() ? "Heads" : "Tails")}.";

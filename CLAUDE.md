@@ -83,11 +83,26 @@ under `Documents/YGO Duel Simulator/Decks`. `Deck` is a simple model of passcode
 lists, **not** an EF entity.
 
 **Duel room** (`Views/Pages/DuelRoomPage` + `Services/DuelState` +
-`Models/Duel/`) is a *manual* simulator — no rules are enforced. `DuelState` holds
-the piles (Hand/Deck/Extra/GY/Banished) and fixed `ZoneSlot`s (main/extra monster,
-spell-trap, field). Interaction is Dueling-Book style: click a card to select it
-(sets `DuelState.Selected` / `BoardCard.IsSelected`) and open the action menu, then
-for placement actions click a highlighted target zone (`ZoneSlot.IsTarget`).
+`Models/Duel/`) is a *manual, two-player* simulator — no rules are enforced; the
+turn/phase tracker is a guide, not a referee. Structure:
+- `PlayerBoard` is one player's half: the piles (Hand/Deck/Extra/GY/Banished), the
+  fixed `ZoneSlot`s (main/extra monster, spell-trap, field), LP, and per-board
+  `LoadDeckAsync`/`Draw`/`Shuffle`. Each `ZoneSlot` knows its `Owner` board.
+- `DuelState` coordinates two `PlayerBoard`s (`Player`, `Opponent`) plus the shared
+  `Selected` card, turn/phase state (`TurnNumber`/`ActiveSide`/`Phase`), and the
+  move/highlight operations that can cross between boards (`RemoveFromCurrent` and
+  `FindBoard` scan both). Placement highlights the *owning* board's zones.
+- Interaction is Dueling-Book style, two menus at the cursor: **left-click** opens
+  the `ViewMenu` popup (table-talk: inspect / declare effect / point — the last two
+  set `DuelState.Announcement` + `BoardCard.IsPointed`, auto-cleared by a
+  `DispatcherTimer`); **right-click** opens the `CardActions` popup (play actions).
+  Placement actions arm `_pending`, close the pile viewer, and highlight valid empty
+  zones (`ZoneSlot.IsTarget`); a left-click on a highlighted zone drops the card.
+  Tokens (`BoardCard.IsToken`) and per-card `Counters` are manual helpers.
+- The page is hosted in the nav `ScrollViewer` (unbounded height), so `Page_Loaded`
+  binds `RootGrid.MaxHeight` to that ScrollViewer's `ViewportHeight` — otherwise the
+  field `Viewbox` renders at full natural size and overflows the top.
+
 `BoardCard`/`ZoneSlot` expose `Visibility`/label helpers for the XAML templates;
 because an empty zone's `ContentControl` still realizes the card template against a
 null data context, visibility bindings in the board card template need
