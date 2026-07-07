@@ -4,6 +4,8 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Shapes;
 using System.Windows.Threading;
 using Microsoft.EntityFrameworkCore;
 using YGODuelSimulator.Data;
@@ -40,6 +42,11 @@ namespace YGODuelSimulator.Views.Pages
         private readonly DispatcherTimer _cueTimer;
         private BoardCard? _pointedCard;
 
+        // An armed "declare attack": the attacking monster, waiting for a target click.
+        // Null when no attack is being declared. The drawn arrow clears after a moment.
+        private BoardCard? _attackFrom;
+        private readonly DispatcherTimer _attackTimer;
+
         // Networked play. Null / false while offline (hot-seat practice).
         private DuelSession? _session;
         private bool _networked;
@@ -59,6 +66,9 @@ namespace YGODuelSimulator.Views.Pages
 
             _cueTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             _cueTimer.Tick += (_, _) => ClearCue();
+
+            _attackTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.4) };
+            _attackTimer.Tick += (_, _) => ClearArrow();
 
             // In a networked duel my own LP changes (buttons or the text box) mirror
             // to the opponent's view of me. Either player's LP change is also logged.
@@ -179,6 +189,17 @@ namespace YGODuelSimulator.Views.Pages
         private void Card_Click(object sender, MouseButtonEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not BoardCard card) return;
+
+            // While a "declare attack" is armed, this click picks the target instead of
+            // opening the card menu.
+            if (_attackFrom is { } attacker)
+            {
+                CompleteAttack(attacker, card);
+                _attackFrom = null;
+                e.Handled = true;
+                return;
+            }
+
             _state.Selected = card;
             RevealButton.Content = card.IsRevealed ? "Unreveal" : "Reveal to opponent";
             ViewMenu.IsOpen = true;
@@ -189,6 +210,7 @@ namespace YGODuelSimulator.Views.Pages
         private void Card_RightClick(object sender, MouseButtonEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not BoardCard card) return;
+            CancelAttackDeclaration();
             _state.Selected = card;
             // Online, you can only play your own cards.
             if (_networked && _state.FindBoard(card) != _state.Player) { e.Handled = true; return; }
@@ -283,6 +305,154 @@ namespace YGODuelSimulator.Views.Pages
             _state.Announcement = null;
         }
 
+        // --- Attack declarations (visual arrow + log; no damage is applied) ---
+
+        // "Declare Attack" arms the selected monster; the next card click is its target.
+        private void DeclareAttack_Click(object sender, RoutedEventArgs e)
+        {
+            ViewMenu.IsOpen = false;
+            if (_state.Selected is not { } c) return;
+            if (MonsterZoneOf(c) is null) { ResultText.Text = "Only a monster on the field can attack."; return; }
+            if (_networked && !IsMine(c)) { ResultText.Text = "You can only attack with your own monsters."; return; }
+            _attackFrom = c;
+            ResultText.Text = $"Pick the monster for {NameOf(c)} to attack (Esc to cancel).";
+        }
+
+        // "Declare Direct Attack" needs no target — for when the opponent has no monsters.
+        private void DeclareDirectAttack_Click(object sender, RoutedEventArgs e)
+        {
+            ViewMenu.IsOpen = false;
+            _attackFrom = null;
+            if (_state.Selected is not { } c) return;
+            if (MonsterZoneOf(c) is not { } loc) { ResultText.Text = "Only a monster on the field can attack."; return; }
+            if (_networked && !IsMine(c)) { ResultText.Text = "You can only attack with your own monsters."; return; }
+
+            AnimateAttack(c, null, direct: true);
+            LogAction(loc.board, $"declares a direct attack with {NameOf(c)}");
+            if (_networked && loc.board == _state.Player)
+                _session?.Send(new AttackMessage { AttackerZone = loc.kind, AttackerIndex = loc.index, Direct = true });
+        }
+
+        private void CompleteAttack(BoardCard attacker, BoardCard target)
+        {
+            ViewMenu.IsOpen = false;
+            if (MonsterZoneOf(attacker) is not { } aloc) return;
+            var defender = aloc.board == _state.Player ? _state.Opponent : _state.Player;
+
+            if (MonsterZoneOf(target) is not { } tloc || tloc.board != defender)
+            {
+                ResultText.Text = "Pick one of the opponent's monsters as the target.";
+                return;
+            }
+
+            AnimateAttack(attacker, target, direct: false);
+            LogAction(aloc.board, $"declares an attack with {NameOf(attacker)} targeting {NameOf(target)}");
+            if (_networked && aloc.board == _state.Player)
+                _session?.Send(new AttackMessage
+                {
+                    AttackerZone = aloc.kind, AttackerIndex = aloc.index,
+                    TargetZone = tloc.kind, TargetIndex = tloc.index, Direct = false,
+                });
+        }
+
+        /// <summary>The board + zone of a card sitting in a monster zone (main or extra),
+        /// or null if it isn't on one.</summary>
+        private (PlayerBoard board, ZoneKind kind, int index)? MonsterZoneOf(BoardCard card)
+        {
+            foreach (var board in new[] { _state.Player, _state.Opponent })
+                foreach (var slot in board.MainMonsterZones.Concat(board.ExtraMonsterZones))
+                    if (ReferenceEquals(slot.Card, card)) return (board, slot.Kind, slot.Index);
+            return null;
+        }
+
+        private void AnimateAttack(BoardCard attacker, BoardCard? target, bool direct)
+        {
+            if (FindCardElement(attacker) is not { } fromEl) return;
+            var start = CenterIn(fromEl, ArrowOverlay);
+
+            Point end;
+            if (!direct && target is not null && FindCardElement(target) is { } toEl)
+                end = CenterIn(toEl, ArrowOverlay);
+            else
+            {
+                // Direct attack: aim at the defending player's side of the board — the top
+                // edge when the local player attacks, the bottom edge when the opponent does.
+                var attackerIsMine = _state.FindBoard(attacker) == _state.Player;
+                var y = attackerIsMine ? 6 : Math.Max(6, ArrowOverlay.ActualHeight - 6);
+                end = new Point(ArrowOverlay.ActualWidth / 2, y);
+                direct = true;
+            }
+            DrawArrow(start, end, direct);
+        }
+
+        private static Point CenterIn(FrameworkElement el, Visual relativeTo) =>
+            el.TransformToVisual(relativeTo).Transform(new Point(el.ActualWidth / 2, el.ActualHeight / 2));
+
+        private void DrawArrow(Point start, Point end, bool direct)
+        {
+            ArrowOverlay.Children.Clear();
+
+            var color = direct ? Color.FromRgb(0xFF, 0xB0, 0x3A) : Color.FromRgb(0xFF, 0x4D, 0x4D);
+            var brush = new SolidColorBrush(color);
+            var thickness = direct ? 6.0 : 4.0;
+
+            ArrowOverlay.Children.Add(new Line
+            {
+                X1 = start.X, Y1 = start.Y, X2 = end.X, Y2 = end.Y,
+                Stroke = brush, StrokeThickness = thickness,
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            });
+
+            var dir = end - start;
+            if (dir.Length >= 1)
+            {
+                dir.Normalize();
+                var normal = new Vector(-dir.Y, dir.X);
+                var headLen = direct ? 24.0 : 18.0;
+                var headHalf = direct ? 14.0 : 10.0;
+                var basePt = end - dir * headLen;
+                ArrowOverlay.Children.Add(new Polygon
+                {
+                    Fill = brush,
+                    Points = new PointCollection { end, basePt + normal * headHalf, basePt - normal * headHalf },
+                });
+            }
+
+            // Pop in, then the timer fades it out.
+            ArrowOverlay.BeginAnimation(UIElement.OpacityProperty, null);
+            ArrowOverlay.Opacity = 1;
+            ArrowOverlay.BeginAnimation(UIElement.OpacityProperty,
+                new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120)));
+            _attackTimer.Stop();
+            _attackTimer.Start();
+        }
+
+        private void ClearArrow()
+        {
+            _attackTimer.Stop();
+            var fade = new DoubleAnimation(ArrowOverlay.Opacity, 0, TimeSpan.FromMilliseconds(250));
+            // Don't wipe a newer arrow that started during the fade (it restarts the timer).
+            fade.Completed += (_, _) => { if (!_attackTimer.IsEnabled) ArrowOverlay.Children.Clear(); };
+            ArrowOverlay.BeginAnimation(UIElement.OpacityProperty, fade);
+        }
+
+        /// <summary>Finds the on-screen element rendering a board card, so an arrow endpoint
+        /// can anchor to it. Depth-first over the playmat visual tree.</summary>
+        private FrameworkElement? FindCardElement(BoardCard card) => FindByDataContext(PlaymatArea, card);
+
+        private static FrameworkElement? FindByDataContext(DependencyObject root, object data)
+        {
+            var count = VisualTreeHelper.GetChildrenCount(root);
+            for (var i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(root, i);
+                if (child is FrameworkElement fe && ReferenceEquals(fe.DataContext, data) && fe.ActualWidth > 0)
+                    return fe;
+                if (FindByDataContext(child, data) is { } found) return found;
+            }
+            return null;
+        }
+
         private void Zone_Click(object sender, MouseButtonEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not ZoneSlot slot) return;
@@ -329,13 +499,21 @@ namespace YGODuelSimulator.Views.Pages
         private void Playmat_Click(object sender, MouseButtonEventArgs e)
         {
             // A click that reached the playmat background cancels the selection.
+            CancelAttackDeclaration();
             EndPlacement();
             Deselect();
         }
 
         private void Page_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key == Key.Escape) { EndPlacement(); Deselect(); }
+            if (e.Key == Key.Escape) { CancelAttackDeclaration(); EndPlacement(); Deselect(); }
+        }
+
+        private void CancelAttackDeclaration()
+        {
+            if (_attackFrom is null) return;
+            _attackFrom = null;
+            ResultText.Text = "Attack declaration cancelled.";
         }
 
         private void BeginPlacement(string verb, bool faceDown, bool defense, params ZoneKind[] kinds)
@@ -937,6 +1115,25 @@ namespace YGODuelSimulator.Views.Pages
                 case EmoteMessage em:
                     o.Emote = em.Emote;
                     if (o.Emote is { } oe) LogAction(o, EmoteVerb(oe));
+                    break;
+
+                case AttackMessage atk:
+                    if (o.Slot(atk.AttackerZone, atk.AttackerIndex)?.Card is { } atkCard)
+                    {
+                        if (atk.Direct)
+                        {
+                            AnimateAttack(atkCard, null, direct: true);
+                            LogAction(o, $"declares a direct attack with {NameOf(atkCard)}");
+                        }
+                        else
+                        {
+                            var tgt = _state.Player.Slot(atk.TargetZone, atk.TargetIndex)?.Card;
+                            AnimateAttack(atkCard, tgt, direct: false);
+                            LogAction(o, tgt is null
+                                ? $"declares an attack with {NameOf(atkCard)}"
+                                : $"declares an attack with {NameOf(atkCard)} targeting {NameOf(tgt)}");
+                        }
+                    }
                     break;
 
                 case ShuffleMessage:

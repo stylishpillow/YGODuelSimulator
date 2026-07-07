@@ -53,6 +53,7 @@ public enum RpsChoice { Rock, Paper, Scissors }
 [JsonDerivedType(typeof(TurnStateMessage), "turnState")]
 [JsonDerivedType(typeof(ChatMessage), "chat")]
 [JsonDerivedType(typeof(EmoteMessage), "emote")]
+[JsonDerivedType(typeof(AttackMessage), "attack")]
 public abstract class NetMessage { }
 
 // --- Pre-game ---
@@ -204,6 +205,19 @@ public sealed class ChatMessage : NetMessage
 public sealed class EmoteMessage : NetMessage
 {
     public string Emote { get; set; } = "";
+}
+
+/// <summary>An attack declaration: the sender's monster (AttackerZone/Index on their
+/// own side) attacks either the receiver's monster (TargetZone/Index) or, when
+/// <see cref="Direct"/> is set, the receiver directly. Purely a visual/table-talk
+/// cue — no damage is applied.</summary>
+public sealed class AttackMessage : NetMessage
+{
+    public ZoneKind AttackerZone { get; set; }
+    public int AttackerIndex { get; set; }
+    public bool Direct { get; set; }
+    public ZoneKind TargetZone { get; set; }
+    public int TargetIndex { get; set; }
 }
 
 /// <summary>Wire copy of the phase enum so the protocol doesn't depend on the

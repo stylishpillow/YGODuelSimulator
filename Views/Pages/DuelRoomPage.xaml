@@ -337,7 +337,7 @@
                             <GradientStop Color="#12241A" Offset="1"/>
                         </RadialGradientBrush>
                     </Border.Background>
-                    <Grid>
+                    <Grid x:Name="PlaymatArea">
                     <Viewbox Stretch="Uniform">
                         <StackPanel>
                             <TextBlock HorizontalAlignment="Center" Foreground="#CCFFFFFF" FontWeight="SemiBold" Margin="0,0,0,2">
@@ -512,6 +512,9 @@
                         <TextBlock Text="{Binding Announcement}" Foreground="White"
                                    FontWeight="SemiBold" FontSize="14"/>
                     </Border>
+
+                    <!-- Attack-declaration arrows are drawn here, over the whole board. -->
+                    <Canvas x:Name="ArrowOverlay" IsHitTestVisible="False" Panel.ZIndex="20"/>
                     </Grid>
                 </Border>
 
@@ -586,6 +589,8 @@
                     <ui:Button x:Name="RevealButton" Content="Reveal to opponent" HorizontalAlignment="Stretch" Margin="0,2" Click="Reveal_Click"/>
                     <ui:Button Content="Declare Effect" HorizontalAlignment="Stretch" Margin="0,2" Click="DeclareEffect_Click"/>
                     <ui:Button Content="Point" HorizontalAlignment="Stretch" Margin="0,2" Click="Point_Click"/>
+                    <ui:Button Content="Declare Attack" HorizontalAlignment="Stretch" Margin="0,2" Click="DeclareAttack_Click"/>
+                    <ui:Button Content="Declare Direct Attack" HorizontalAlignment="Stretch" Margin="0,2" Click="DeclareDirectAttack_Click"/>
                 </StackPanel>
             </Border>
         </Popup>
