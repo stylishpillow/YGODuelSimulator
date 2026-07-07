@@ -10,6 +10,7 @@
         WindowCornerPreference="Round"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
+        Icon="pack://application:,,,/Assets/app-icon.png"
         Title="Sign in — YGO Duel Simulator" Height="460" Width="420">
     <Grid>
         <Grid.RowDefinitions>

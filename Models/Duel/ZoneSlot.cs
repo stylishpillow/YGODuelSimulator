@@ -19,6 +19,10 @@ namespace YGODuelSimulator.Models.Duel
         /// <summary>The board this zone belongs to (set when the board builds it).</summary>
         public PlayerBoard Owner { get; }
 
+        /// <summary>True for the opponent's zones, so the template can rotate the card
+        /// 180° to face away from us (as it would across a real table).</summary>
+        public bool IsOpponent => Owner.Side == PlayerSide.Opponent;
+
         /// <summary>The leftmost and rightmost Spell/Trap zones double as Pendulum
         /// Zones (rulebook p.5).</summary>
         public bool IsPendulumZone => Kind == ZoneKind.SpellTrap && (Index == 0 || Index == 4);
