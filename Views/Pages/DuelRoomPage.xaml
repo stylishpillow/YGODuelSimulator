@@ -78,6 +78,27 @@
             </Grid>
         </DataTemplate>
 
+        <!-- A display-only card for the reveal viewer. It shows a detached snapshot of
+             the cards the opponent is revealing (their hand or a single card), which
+             must not be selectable or actionable. So: no click handlers and none of
+             the field overlays (selection / point / reveal marker). The pile viewer,
+             by contrast, keeps the interactive BoardCardTemplate because clicking a
+             card there selects the real card to act on it (e.g. Special Summon). -->
+        <DataTemplate x:Key="ViewerCardTemplate">
+            <Grid Width="82" Height="120" Background="Transparent" ToolTip="{Binding Name}">
+                <Image Source="{Binding Image}" Stretch="Uniform"
+                       Visibility="{Binding FrontVisibility, FallbackValue=Collapsed}"/>
+                <Control Template="{StaticResource CardBack}"
+                         Visibility="{Binding BackVisibility, FallbackValue=Collapsed}"/>
+                <!-- Tokens have no artwork; show a labelled placeholder when face-up. -->
+                <Border Visibility="{Binding TokenVisibility, FallbackValue=Collapsed}"
+                        CornerRadius="5" Background="#3A5A3A" BorderBrush="#88BFE0BF" BorderThickness="1.5">
+                    <TextBlock Text="TOKEN" Foreground="#DDEFFFEF" FontWeight="Bold" FontSize="13"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+            </Grid>
+        </DataTemplate>
+
         <!-- A single-card zone: a click target tinted by zone type, with a faint
              watermark label. Highlights green while it's a valid placement target. -->
         <DataTemplate x:Key="ZoneTemplate">
@@ -498,7 +519,7 @@
                     <TextBlock x:Name="RevealViewerTitle" DockPanel.Dock="Top" FontSize="16"
                                FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                     <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="470" Width="720">
-                        <ItemsControl x:Name="RevealViewerItems" ItemTemplate="{StaticResource BoardCardTemplate}">
+                        <ItemsControl x:Name="RevealViewerItems" ItemTemplate="{StaticResource ViewerCardTemplate}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
