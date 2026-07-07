@@ -68,6 +68,13 @@
                     <TextBlock Text="{Binding Counters}" Foreground="White" FontSize="12" FontWeight="Bold"
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
+                <!-- "Revealed to opponent" marker -->
+                <Border Visibility="{Binding RevealVisibility, FallbackValue=Collapsed}"
+                        Width="20" Height="20" CornerRadius="10" Background="#DD37C6FF"
+                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-5,-5,0,0"
+                        IsHitTestVisible="False">
+                    <TextBlock Text="👁" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
             </Grid>
         </DataTemplate>
 
@@ -153,8 +160,8 @@
                 <!-- Line 1: decks + turn / phase -->
                 <WrapPanel Orientation="Horizontal">
                     <ComboBox x:Name="DeckPicker" Width="150" VerticalAlignment="Center"/>
-                    <ui:Button Content="Load → Player" Margin="6,0,0,0" Click="LoadPlayer_Click"/>
-                    <ui:Button Content="Load → Opponent" Margin="6,0,0,0" Click="LoadOpponent_Click"/>
+                    <ui:Button x:Name="LoadPlayerBtn" Content="Load → Player" Margin="6,0,0,0" Click="LoadPlayer_Click"/>
+                    <ui:Button x:Name="LoadOpponentBtn" Content="Load → Opponent" Margin="6,0,0,0" Click="LoadOpponent_Click"/>
 
                     <Border Width="1" Background="#40FFFFFF" Margin="14,2,14,2"/>
 
@@ -167,8 +174,10 @@
                 <!-- Line 2: active-player actions + LP + dice -->
                 <WrapPanel Orientation="Horizontal" Margin="0,10,0,0">
                     <ui:Button Content="Draw" Click="Draw_Click"/>
-                    <ui:Button Content="Shuffle" Margin="6,0,0,0" Click="Shuffle_Click"/>
+                    <ui:Button Content="Shuffle deck" Margin="6,0,0,0" Click="Shuffle_Click"/>
                     <ui:Button Content="Token" Margin="6,0,0,0" Click="CreateToken_Click"/>
+                    <ui:Button Content="Reveal hand" Margin="6,0,0,0" Click="RevealHand_Click"/>
+                    <ui:Button Content="Discard random" Margin="6,0,0,0" Click="DiscardRandom_Click"/>
 
                     <Border Width="1" Background="#40FFFFFF" Margin="14,2,14,2"/>
 
@@ -178,9 +187,9 @@
                     <ui:Button Content="−500" Margin="4,0,0,0" Click="PlayerLpMinus500_Click"/>
 
                     <TextBlock Text="O LP" VerticalAlignment="Center" Margin="14,0,4,0" FontWeight="SemiBold"/>
-                    <ui:TextBox Width="64" Text="{Binding Opponent.LifePoints, Mode=TwoWay}"/>
-                    <ui:Button Content="−1000" Margin="4,0,0,0" Click="OppLpMinus1000_Click"/>
-                    <ui:Button Content="−500" Margin="4,0,0,0" Click="OppLpMinus500_Click"/>
+                    <ui:TextBox x:Name="OppLpBox" Width="64" Text="{Binding Opponent.LifePoints, Mode=TwoWay}"/>
+                    <ui:Button x:Name="OppLpMinus1000Btn" Content="−1000" Margin="4,0,0,0" Click="OppLpMinus1000_Click"/>
+                    <ui:Button x:Name="OppLpMinus500Btn" Content="−500" Margin="4,0,0,0" Click="OppLpMinus500_Click"/>
 
                     <Border Width="1" Background="#40FFFFFF" Margin="14,2,14,2"/>
 
@@ -267,6 +276,11 @@
                                 <ContentControl Grid.Row="0" Grid.Column="4" Content="{Binding Opponent.SpellTrapZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                 <ContentControl Grid.Row="0" Grid.Column="5" Content="{Binding Opponent.SpellTrapZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                 <Border Grid.Row="0" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="o:deck" MouseLeftButtonUp="Pile_Click">
+                                    <Border.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Shuffle" Click="ShuffleDeck_Click"/>
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
                                     <Grid>
                                         <Control Template="{StaticResource CardBack}" Margin="6"/>
                                         <Border VerticalAlignment="Bottom" Background="#B0000000" CornerRadius="0,0,4,4">
@@ -359,6 +373,11 @@
                                 <ContentControl Grid.Row="2" Grid.Column="4" Content="{Binding Player.SpellTrapZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                 <ContentControl Grid.Row="2" Grid.Column="5" Content="{Binding Player.SpellTrapZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                 <Border Grid.Row="2" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="p:deck" MouseLeftButtonUp="Pile_Click">
+                                    <Border.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Shuffle" Click="ShuffleDeck_Click"/>
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
                                     <Grid>
                                         <Control Template="{StaticResource CardBack}" Margin="6"/>
                                         <Border VerticalAlignment="Bottom" Background="#B0000000" CornerRadius="0,0,4,4">
@@ -408,6 +427,7 @@
                 <StackPanel Width="150">
                     <TextBlock Text="CARD" Foreground="#8AA" Margin="4,2" FontSize="10" FontWeight="Bold"/>
                     <ui:Button Content="Inspect" HorizontalAlignment="Stretch" Margin="0,2" Click="Inspect_Click"/>
+                    <ui:Button x:Name="RevealButton" Content="Reveal to opponent" HorizontalAlignment="Stretch" Margin="0,2" Click="Reveal_Click"/>
                     <ui:Button Content="Declare Effect" HorizontalAlignment="Stretch" Margin="0,2" Click="DeclareEffect_Click"/>
                     <ui:Button Content="Point" HorizontalAlignment="Stretch" Margin="0,2" Click="Point_Click"/>
                 </StackPanel>
@@ -469,5 +489,121 @@
                 </DockPanel>
             </Border>
         </Popup>
+
+        <!-- Reveal viewer: what the opponent is showing you (single card or hand). -->
+        <Popup x:Name="RevealViewer" Placement="Center" StaysOpen="False" AllowsTransparency="True">
+            <Border Background="#F0202020" BorderBrush="#60BFE8FF" BorderThickness="1"
+                    CornerRadius="6" Padding="12" MaxWidth="760">
+                <DockPanel>
+                    <TextBlock x:Name="RevealViewerTitle" DockPanel.Dock="Top" FontSize="16"
+                               FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="470" Width="720">
+                        <ItemsControl x:Name="RevealViewerItems" ItemTemplate="{StaticResource BoardCardTemplate}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Popup>
+
+        <!-- Pre-game overlay: pick practice vs online, then the lobby / deck / RPS /
+             turn-order flow. Hidden once a duel is underway. -->
+        <Border x:Name="Overlay" Grid.Row="0" Grid.RowSpan="2" Background="#F00B0E14" Panel.ZIndex="50">
+            <Border Background="#161B26" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="12"
+                    Padding="28" MinWidth="420" MaxWidth="520"
+                    VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Grid>
+                    <!-- Entry -->
+                    <StackPanel x:Name="EntryPanel">
+                        <TextBlock Text="Duel Room" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Play a local practice game, or duel someone on your network."
+                                   Opacity="0.7" TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,20"/>
+                        <ui:Button Content="Play online (LAN)" Appearance="Primary" HorizontalAlignment="Stretch"
+                                   Margin="0,0,0,10" Click="PlayOnline_Click"/>
+                        <ui:Button Content="Practice offline" HorizontalAlignment="Stretch" Click="Practice_Click"/>
+                    </StackPanel>
+
+                    <!-- Lobby -->
+                    <StackPanel x:Name="LobbyPanel" Visibility="Collapsed">
+                        <TextBlock Text="LAN games" FontSize="20" FontWeight="Bold"/>
+                        <TextBlock Text="Create a room others can join, or pick one below."
+                                   Opacity="0.7" Margin="0,4,0,14"/>
+                        <ui:Button Content="Create room" Appearance="Primary" HorizontalAlignment="Stretch"
+                                   Click="CreateRoom_Click"/>
+                        <TextBlock Text="Rooms on your network" Opacity="0.6" Margin="0,16,0,6"
+                                   FontSize="12" FontWeight="SemiBold"/>
+                        <Border MinHeight="80" Background="#0DFFFFFF" CornerRadius="6" Padding="6">
+                            <Grid>
+                                <ItemsControl x:Name="RoomsList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="2,3">
+                                                <TextBlock Text="{Binding HostName}" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                                                <ui:Button Content="Join" HorizontalAlignment="Right" Tag="{Binding}" Click="JoinRoom_Click"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock x:Name="NoRoomsText" Text="Searching…" Opacity="0.5"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ui:Button Content="Back" HorizontalAlignment="Left" Margin="0,14,0,0" Click="BackToEntry_Click"/>
+                    </StackPanel>
+
+                    <!-- Connecting -->
+                    <StackPanel x:Name="ConnectingPanel" Visibility="Collapsed">
+                        <TextBlock x:Name="ConnectingText" Text="Connecting…" FontSize="18" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                        <ui:Button Content="Cancel" HorizontalAlignment="Center" Margin="0,18,0,0" Click="BackToEntry_Click"/>
+                    </StackPanel>
+
+                    <!-- Deck select -->
+                    <StackPanel x:Name="DeckPanel" Visibility="Collapsed">
+                        <TextBlock x:Name="DeckOppText" Text="Connected." FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                        <TextBlock Text="Choose your deck" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
+                        <ComboBox x:Name="OnlineDeckPicker" Margin="0,12,0,0" HorizontalAlignment="Stretch"/>
+                        <ui:Button x:Name="ReadyButton" Content="Ready" Appearance="Primary"
+                                   HorizontalAlignment="Stretch" Margin="0,12,0,0" Click="ReadyDeck_Click"/>
+                        <TextBlock x:Name="DeckStatusText" Opacity="0.7" HorizontalAlignment="Center"
+                                   Margin="0,12,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- Rock-paper-scissors -->
+                    <StackPanel x:Name="RpsPanel" Visibility="Collapsed">
+                        <TextBlock Text="Rock · Paper · Scissors" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Winner decides who goes first." Opacity="0.7"
+                                   HorizontalAlignment="Center" Margin="0,4,0,16"/>
+                        <StackPanel x:Name="RpsButtons" Orientation="Horizontal" HorizontalAlignment="Center">
+                            <ui:Button Content="✊ Rock" Margin="4" Click="RpsRock_Click"/>
+                            <ui:Button Content="✋ Paper" Margin="4" Click="RpsPaper_Click"/>
+                            <ui:Button Content="✌ Scissors" Margin="4" Click="RpsScissors_Click"/>
+                        </StackPanel>
+                        <TextBlock x:Name="RpsStatusText" HorizontalAlignment="Center" Margin="0,16,0,0"
+                                   FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- Choose order -->
+                    <StackPanel x:Name="OrderPanel" Visibility="Collapsed">
+                        <TextBlock x:Name="OrderText" FontSize="18" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                        <StackPanel x:Name="OrderButtons" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                            <ui:Button Content="Go first" Appearance="Primary" Margin="4" Click="GoFirst_Click"/>
+                            <ui:Button Content="Go second" Margin="4" Click="GoSecond_Click"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Disconnected -->
+                    <StackPanel x:Name="DisconnectedPanel" Visibility="Collapsed">
+                        <TextBlock x:Name="DisconnectedText" FontSize="16" HorizontalAlignment="Center"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+                        <ui:Button Content="Back to menu" HorizontalAlignment="Center" Margin="0,16,0,0" Click="BackToEntry_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Border>
     </Grid>
 </Page>

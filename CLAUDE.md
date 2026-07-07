@@ -126,6 +126,28 @@ turn/phase tracker is a guide, not a referee. Structure:
   binds `RootGrid.MaxHeight` to that ScrollViewer's `ViewportHeight` — otherwise the
   field `Viewbox` renders at full natural size and overflows the top.
 
+**Networked duels (LAN P2P, `Services/Net/`).** The Duel Room opens on a pre-game
+**overlay** (`DuelRoomPage` — `Overlay` + panels) offering offline practice or online
+play. Online flow: `DuelSession` drives a `MatchPhase` state machine
+(Lobby → Connecting → DeckSelect → Rps → ChooseOrder → InDuel).
+- **Transport**: `LanDiscovery` (UDP broadcast beacons on `DiscoveryPort`, self-expiring
+  room list) finds rooms; `P2PConnection` is the direct TCP link (host `TcpListener` /
+  joiner `TcpClient`), framing messages as 4-byte length + UTF-8 JSON. `NetProtocol`
+  holds the polymorphic `NetMessage` types (`System.Text.Json` `[JsonPolymorphic]`).
+- **Perspective**: each client's `DuelState.Player` is *me* (bottom), `Opponent` is the
+  remote *shadow* (top). Local actions in `DuelRoomPage` branch on `_networked`: apply
+  to the Player side **and** `_session.Send(...)` a message describing the *publicly
+  visible* effect. Inbound messages (`OnDuelMessage`) are applied **in order** (a queue,
+  since each may await a DB card lookup) to the Opponent shadow.
+- **Hidden info**: the opponent's hand/deck/face-down cards are `BoardCard.Hidden()`
+  placeholders (render as backs); a `SummonMessage`/`RevealMessage` carries the passcode
+  so the receiver builds the real card via `BuildCardAsync` (shared seeded DB + image
+  cache). `From` (source zone) on placement messages tells the receiver which pile to
+  remove from (so Extra Deck / GY special summons stay in sync). Turn state syncs via one
+  `TurnStateMessage` (`ActiveIsSender` resolved to the receiver's perspective). LP mirrors
+  via a `Player.PropertyChanged` hook. Offline (`_networked == false`) is unchanged
+  hot-seat; the offline-only toolbar controls are disabled online.
+
 `BoardCard`/`ZoneSlot` expose `Visibility`/label helpers for the XAML templates;
 because an empty zone's `ContentControl` still realizes the card template against a
 null data context, visibility bindings in the board card template need

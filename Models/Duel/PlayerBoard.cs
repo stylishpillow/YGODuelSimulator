@@ -56,6 +56,27 @@ namespace YGODuelSimulator.Models.Duel
         public IEnumerable<ZoneSlot> AllSlots() =>
             MainMonsterZones.Concat(ExtraMonsterZones).Concat(SpellTrapZones).Append(FieldZone);
 
+        /// <summary>The single-card zone of the given kind + index, or null.</summary>
+        public ZoneSlot? Slot(ZoneKind kind, int index) => kind switch
+        {
+            ZoneKind.MainMonster => index >= 0 && index < MainMonsterZones.Count ? MainMonsterZones[index] : null,
+            ZoneKind.ExtraMonster => index >= 0 && index < ExtraMonsterZones.Count ? ExtraMonsterZones[index] : null,
+            ZoneKind.SpellTrap => index >= 0 && index < SpellTrapZones.Count ? SpellTrapZones[index] : null,
+            ZoneKind.Field => FieldZone,
+            _ => null,
+        };
+
+        /// <summary>The pile collection of the given kind, or null if it isn't a pile.</summary>
+        public ObservableCollection<BoardCard>? Pile(ZoneKind kind) => kind switch
+        {
+            ZoneKind.Hand => Hand,
+            ZoneKind.Deck => Deck,
+            ZoneKind.ExtraDeck => ExtraDeck,
+            ZoneKind.Graveyard => Graveyard,
+            ZoneKind.Banished => Banished,
+            _ => null,
+        };
+
         /// <summary>Loads a deck: fetch the cards, fill the Deck and Extra Deck piles,
         /// shuffle, clear the board, and draw an opening hand of five.</summary>
         public async Task LoadDeckAsync(Deck deck)
