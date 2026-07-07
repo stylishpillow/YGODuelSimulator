@@ -11,6 +11,7 @@ public class AppDbContext : DbContext
     public DbSet<CardPrice> CardPrices => Set<CardPrice>();
     public DbSet<CardLinkMarker> CardLinkMarkers => Set<CardLinkMarker>();
     public DbSet<CardFormat> CardFormats => Set<CardFormat>();
+    public DbSet<User> Users => Set<User>();
 
     public AppDbContext() { }
 
@@ -68,6 +69,11 @@ public class AppDbContext : DbContext
             e.HasIndex(f => f.CardId);
             e.HasOne(f => f.Card).WithMany(c => c.Formats)
                 .HasForeignKey(f => f.CardId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<User>(e =>
+        {
+            e.HasIndex(u => u.Username).IsUnique();
         });
     }
 }

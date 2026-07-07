@@ -35,7 +35,7 @@
                         <ui:SymbolIcon Symbol="Layer24"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <ui:NavigationViewItem Content="Card Database" TargetPageType="{x:Type pages:CardDatabasePage}">
+                <ui:NavigationViewItem x:Name="CardDatabaseNavItem" Content="Card Database" TargetPageType="{x:Type pages:CardDatabasePage}">
                     <ui:NavigationViewItem.Icon>
                         <ui:SymbolIcon Symbol="Database24"/>
                     </ui:NavigationViewItem.Icon>
@@ -47,6 +47,11 @@
                 </ui:NavigationViewItem>
             </ui:NavigationView.MenuItems>
             <ui:NavigationView.FooterMenuItems>
+                <ui:NavigationViewItem x:Name="UserNavItem" TargetPageType="{x:Type pages:ProfilePage}">
+                    <ui:NavigationViewItem.Icon>
+                        <ui:SymbolIcon Symbol="Person24"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
                 <ui:NavigationViewItem Content="Settings" TargetPageType="{x:Type pages:SettingsPage}">
                     <ui:NavigationViewItem.Icon>
                         <ui:SymbolIcon Symbol="Settings24"/>
