@@ -161,7 +161,7 @@ namespace YGODuelSimulator.Views.Pages
             var text = ChatInput.Text?.Trim();
             if (string.IsNullOrEmpty(text)) return;
             ChatInput.Text = "";
-            _state.LogChat(_state.Player.DisplayName, text);
+            _state.LogChat(_state.Player.DisplayName, text, DuelLogSide.Player);
             if (_networked) _session?.Send(new ChatMessage { Text = text });
         }
 
@@ -364,6 +364,44 @@ namespace YGODuelSimulator.Views.Pages
                     if (ReferenceEquals(slot.Card, card)) return (board, slot.Kind, slot.Index);
             return null;
         }
+
+        // --- Control swap ("brain control": the monster moves to the other side, whose
+        //     player then owns it) ---
+
+        private void SwapControl_Click(object sender, RoutedEventArgs e)
+        {
+            ViewMenu.IsOpen = false;
+            if (_state.Selected is not { } c) return;
+            if (MonsterZoneOf(c) is not { } src)
+            {
+                ResultText.Text = "Only a monster on the field can change control.";
+                return;
+            }
+            var fromBoard = src.board;
+            var toBoard = fromBoard == _state.Player ? _state.Opponent : _state.Player;
+            if (FirstEmptyMonsterZone(toBoard) is not { } dest)
+            {
+                ResultText.Text = $"{toBoard.DisplayName} has no free Monster Zone.";
+                return;
+            }
+
+            var faceDown = c.FaceDown;
+            var defense = c.Defense;
+            _state.MoveToSlot(c, dest); // moving to the other board makes it the new owner
+            _state.Log($"Control of {NameOf(c)} passes from {fromBoard.DisplayName} to {toBoard.DisplayName}");
+            if (_networked)
+                _session?.Send(new ControlSwapMessage
+                {
+                    FromSendersField = fromBoard == _state.Player,
+                    SourceZone = src.kind, SourceIndex = src.index,
+                    DestZone = dest.Kind, DestIndex = dest.Index,
+                    FaceDown = faceDown, Defense = defense,
+                });
+            Deselect();
+        }
+
+        private static ZoneSlot? FirstEmptyMonsterZone(PlayerBoard board) =>
+            board.MainMonsterZones.FirstOrDefault(s => s.IsEmpty);
 
         private void AnimateAttack(BoardCard attacker, BoardCard? target, bool direct)
         {
@@ -831,7 +869,8 @@ namespace YGODuelSimulator.Views.Pages
         {
             EndSession();
             _networked = false;
-            _state.Player.DisplayName = "Player";
+            // Use the logged-in account name for the local player, even offline.
+            _state.Player.DisplayName = Session.CurrentUser?.Username ?? "Player";
             _state.Opponent.DisplayName = "Opponent";
             StartLog();
             _state.Log("Offline practice started.");
@@ -1109,13 +1148,32 @@ namespace YGODuelSimulator.Views.Pages
                     break;
 
                 case ChatMessage cm:
-                    _state.LogChat(o.DisplayName, cm.Text);
+                    _state.LogChat(o.DisplayName, cm.Text, DuelLogSide.Opponent);
                     break;
 
                 case EmoteMessage em:
                     o.Emote = em.Emote;
                     if (o.Emote is { } oe) LogAction(o, EmoteVerb(oe));
                     break;
+
+                case ControlSwapMessage cs:
+                {
+                    // Sides are mirrored for the receiver: whatever the sender did on
+                    // their Player board happens on our Opponent shadow and vice versa.
+                    var srcBoard = cs.FromSendersField ? o : _state.Player;
+                    var dstBoard = cs.FromSendersField ? _state.Player : o;
+                    var srcSlot = srcBoard.Slot(cs.SourceZone, cs.SourceIndex);
+                    var dstSlot = dstBoard.Slot(cs.DestZone, cs.DestIndex);
+                    if (srcSlot?.Card is { } moving && dstSlot is not null)
+                    {
+                        srcSlot.Card = null;
+                        moving.FaceDown = cs.FaceDown;
+                        moving.Defense = cs.Defense;
+                        dstSlot.Card = moving;
+                        _state.Log($"Control of {NameOf(moving)} passes from {srcBoard.DisplayName} to {dstBoard.DisplayName}");
+                    }
+                    break;
+                }
 
                 case AttackMessage atk:
                     if (o.Slot(atk.AttackerZone, atk.AttackerIndex)?.Card is { } atkCard)

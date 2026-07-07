@@ -221,8 +221,13 @@
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsChat}" Value="True">
-                                <Setter Property="Foreground" Value="#EAF2FF"/>
+                            <!-- Chat is colour-coded: the local player blue, the opponent red. -->
+                            <DataTrigger Binding="{Binding Side}" Value="Player">
+                                <Setter Property="Foreground" Value="#6FB4FF"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Side}" Value="Opponent">
+                                <Setter Property="Foreground" Value="#FF7A7A"/>
                                 <Setter Property="FontWeight" Value="SemiBold"/>
                             </DataTrigger>
                         </Style.Triggers>
@@ -599,6 +604,7 @@
                     <ui:Button Content="Point" HorizontalAlignment="Stretch" Margin="0,2" Click="Point_Click"/>
                     <ui:Button Content="Declare Attack" HorizontalAlignment="Stretch" Margin="0,2" Click="DeclareAttack_Click"/>
                     <ui:Button Content="Declare Direct Attack" HorizontalAlignment="Stretch" Margin="0,2" Click="DeclareDirectAttack_Click"/>
+                    <ui:Button Content="Swap Control" HorizontalAlignment="Stretch" Margin="0,2" Click="SwapControl_Click"/>
                 </StackPanel>
             </Border>
         </Popup>

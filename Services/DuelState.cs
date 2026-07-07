@@ -9,9 +9,13 @@ namespace YGODuelSimulator.Services
     /// <summary>The phases of a turn (rulebook p.34).</summary>
     public enum DuelPhase { Draw, Standby, Main1, Battle, Main2, End }
 
-    /// <summary>One line in the duel log: a timestamp, the text, and whether it's a
-    /// typed chat line (styled differently from a system action entry).</summary>
-    public sealed record DuelLogEntry(string Time, string Text, bool IsChat);
+    /// <summary>Who a log line is attributed to, for colour-coding: neutral system
+    /// actions, the local player's chat (blue), or the opponent's chat (red).</summary>
+    public enum DuelLogSide { System, Player, Opponent }
+
+    /// <summary>One line in the duel log: a timestamp, the text, and its side (which
+    /// drives the colour — system actions are neutral, chat is blue/red).</summary>
+    public sealed record DuelLogEntry(string Time, string Text, DuelLogSide Side);
 
     /// <summary>
     /// A two-player manual duel: two <see cref="PlayerBoard"/> halves plus the
@@ -42,12 +46,12 @@ namespace YGODuelSimulator.Services
         /// line, oldest first.</summary>
         public ObservableCollection<DuelLogEntry> LogEntries { get; } = [];
 
-        /// <summary>Records an action such as "Alice drew a card".</summary>
-        public void Log(string message) => AddEntry(new DuelLogEntry(Now(), message, IsChat: false));
+        /// <summary>Records a neutral action such as "Alice drew a card".</summary>
+        public void Log(string message) => AddEntry(new DuelLogEntry(Now(), message, DuelLogSide.System));
 
-        /// <summary>Records a typed chat line such as "Alice: gg".</summary>
-        public void LogChat(string who, string text) =>
-            AddEntry(new DuelLogEntry(Now(), $"{who}: {text}", IsChat: true));
+        /// <summary>Records a typed chat line such as "Alice: gg", coloured by side.</summary>
+        public void LogChat(string who, string text, DuelLogSide side) =>
+            AddEntry(new DuelLogEntry(Now(), $"{who}: {text}", side));
 
         private void AddEntry(DuelLogEntry entry)
         {

@@ -54,6 +54,7 @@ public enum RpsChoice { Rock, Paper, Scissors }
 [JsonDerivedType(typeof(ChatMessage), "chat")]
 [JsonDerivedType(typeof(EmoteMessage), "emote")]
 [JsonDerivedType(typeof(AttackMessage), "attack")]
+[JsonDerivedType(typeof(ControlSwapMessage), "controlSwap")]
 public abstract class NetMessage { }
 
 // --- Pre-game ---
@@ -218,6 +219,21 @@ public sealed class AttackMessage : NetMessage
     public bool Direct { get; set; }
     public ZoneKind TargetZone { get; set; }
     public int TargetIndex { get; set; }
+}
+
+/// <summary>A control change ("brain control"): a monster moves to the other player's
+/// side, who becomes its owner. Coordinates are the sender's; the receiver mirrors the
+/// boards. <see cref="FromSendersField"/> is true when the sender is giving away one of
+/// their own monsters, false when taking one of the opponent's.</summary>
+public sealed class ControlSwapMessage : NetMessage
+{
+    public bool FromSendersField { get; set; }
+    public ZoneKind SourceZone { get; set; }
+    public int SourceIndex { get; set; }
+    public ZoneKind DestZone { get; set; }
+    public int DestIndex { get; set; }
+    public bool FaceDown { get; set; }
+    public bool Defense { get; set; }
 }
 
 /// <summary>Wire copy of the phase enum so the protocol doesn't depend on the
