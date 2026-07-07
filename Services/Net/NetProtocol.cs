@@ -49,7 +49,7 @@ public enum RpsChoice { Rock, Paper, Scissors }
 [JsonDerivedType(typeof(CounterMessage), "counter")]
 [JsonDerivedType(typeof(ShuffleMessage), "shuffle")]
 [JsonDerivedType(typeof(AnnounceMessage), "announce")]
-[JsonDerivedType(typeof(RevealCardsMessage), "reveal")]
+[JsonDerivedType(typeof(RevealCardsMessage), "revealCards")]
 [JsonDerivedType(typeof(TurnStateMessage), "turnState")]
 [JsonDerivedType(typeof(ChatMessage), "chat")]
 public abstract class NetMessage { }
