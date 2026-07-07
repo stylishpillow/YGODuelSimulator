@@ -127,6 +127,7 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
         conn.MessageReceived += OnMessage;
         conn.Disconnected += OnDisconnected;
         conn.Send(new HelloMessage { Username = LocalName });
+        conn.Start(); // begin receiving only after the handler is attached
         Phase = MatchPhase.DeckSelect;
         SetStatus(null);
     }
@@ -138,6 +139,7 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
         _localDeck = deck;
         _connection?.Send(deck);
         Raise(nameof(LocalDeckReady));
+        Changed?.Invoke();   // refresh the overlay to show "You: ready"
         TryStartRps();
     }
 
