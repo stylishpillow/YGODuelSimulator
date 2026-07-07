@@ -27,6 +27,14 @@ namespace YGODuelSimulator.Views.Pages
         // A placement armed from the action menu: the face/position to apply once a
         // highlighted zone is clicked. Null when nothing is pending.
         private (bool faceDown, bool defense)? _pending;
+        // The log verb for the armed placement ("Normal Summoned", "Set", …).
+        private string _pendingVerb = "played";
+
+        // Last-seen LP per board, so a change can be logged as a delta. Logging is off
+        // until a game starts (so the initial 8000 setup isn't logged).
+        private int _playerLpShadow = 8000;
+        private int _oppLpShadow = 8000;
+        private bool _loggingLp;
 
         // A "point"/"declare" cue clears itself after a moment.
         private readonly DispatcherTimer _cueTimer;
@@ -53,12 +61,98 @@ namespace YGODuelSimulator.Views.Pages
             _cueTimer.Tick += (_, _) => ClearCue();
 
             // In a networked duel my own LP changes (buttons or the text box) mirror
-            // to the opponent's view of me.
+            // to the opponent's view of me. Either player's LP change is also logged.
             _state.Player.PropertyChanged += (_, e) =>
             {
-                if (_networked && e.PropertyName == nameof(PlayerBoard.LifePoints))
-                    _session?.Send(new LifePointsMessage { LifePoints = _state.Player.LifePoints });
+                if (e.PropertyName != nameof(PlayerBoard.LifePoints)) return;
+                if (_networked) _session?.Send(new LifePointsMessage { LifePoints = _state.Player.LifePoints });
+                LogLifePoints(_state.Player, ref _playerLpShadow);
             };
+            _state.Opponent.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(PlayerBoard.LifePoints))
+                    LogLifePoints(_state.Opponent, ref _oppLpShadow);
+            };
+
+            // Keep the log scrolled to the newest entry.
+            _state.LogEntries.CollectionChanged += (_, _) =>
+                Dispatcher.BeginInvoke(new Action(() => LogScroll.ScrollToBottom()), DispatcherPriority.Background);
+        }
+
+        // --- Game log helpers ---
+
+        /// <summary>Logs an action attributed to a player, e.g. "Alice drew a card".</summary>
+        private void LogAction(PlayerBoard actor, string verb) => _state.Log($"{actor.DisplayName} {verb}");
+
+        /// <summary>The card's name for the log, or a neutral word for tokens.</summary>
+        private static string NameOf(BoardCard card) => card.IsToken ? "a token" : card.Name;
+
+        private void LogLifePoints(PlayerBoard board, ref int shadow)
+        {
+            var now = board.LifePoints;
+            if (_loggingLp && now != shadow)
+            {
+                var delta = now - shadow;
+                LogAction(board, delta < 0 ? $"lost {-delta} LP (now {now})" : $"gained {delta} LP (now {now})");
+            }
+            shadow = now;
+        }
+
+        /// <summary>Resets the log and enables LP-change logging for a fresh game.</summary>
+        private void StartLog()
+        {
+            _state.LogEntries.Clear();
+            _playerLpShadow = _state.Player.LifePoints;
+            _oppLpShadow = _state.Opponent.LifePoints;
+            _loggingLp = true;
+        }
+
+        private static string PileLabel(ZoneKind pile, bool toTop) => pile switch
+        {
+            ZoneKind.Hand => "their hand",
+            ZoneKind.Graveyard => "the Graveyard",
+            ZoneKind.Banished => "banishment",
+            ZoneKind.ExtraDeck => "the Extra Deck",
+            ZoneKind.Deck => toTop ? "the top of the Deck" : "the bottom of the Deck",
+            _ => "a pile",
+        };
+
+        private static string EmoteVerb(string key) => key switch
+        {
+            "thinking" => "is thinking…",
+            "ok" => "is OK with that",
+            "respond" => "wants to respond",
+            _ => "reacts",
+        };
+
+        // --- Status emotes (shown on my portrait; broadcast so the opponent sees) ---
+
+        private void Emote_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not string key) return;
+            var me = _state.Player;
+            // Pressing the active emote again clears it.
+            me.Emote = me.Emote == key ? null : key;
+            if (me.Emote is { } active) LogAction(me, EmoteVerb(active));
+            if (_networked) _session?.Send(new EmoteMessage { Emote = me.Emote ?? "" });
+        }
+
+        // --- Chat ---
+
+        private void ChatInput_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) { SendChat(); e.Handled = true; }
+        }
+
+        private void SendChat_Click(object sender, RoutedEventArgs e) => SendChat();
+
+        private void SendChat()
+        {
+            var text = ChatInput.Text?.Trim();
+            if (string.IsNullOrEmpty(text)) return;
+            ChatInput.Text = "";
+            _state.LogChat(_state.Player.DisplayName, text);
+            if (_networked) _session?.Send(new ChatMessage { Text = text });
         }
 
         // The navigation host places pages in a ScrollViewer, which hands the page an
@@ -121,6 +215,7 @@ namespace YGODuelSimulator.Views.Pages
             {
                 _state.Announce(c, verb);
                 PointAt(c);
+                LogAction(_state.FindBoard(c), $"{verb} {NameOf(c)}");
                 // Broadcast a cue about one of my own field cards so the opponent sees it.
                 if (_networked && IsMine(c) && LocateOnField(c) is { } loc)
                     _session?.Send(new AnnounceMessage { Verb = verb, Zone = loc.kind, Index = loc.index });
@@ -140,6 +235,8 @@ namespace YGODuelSimulator.Views.Pages
             if (_revealed.Remove(c)) c.IsRevealed = false;
             else { _revealed.Add(c); c.IsRevealed = true; }
 
+            LogAction(_state.Player, c.IsRevealed ? $"revealed {NameOf(c)}" : "hid a revealed card");
+
             _session?.Send(new RevealCardsMessage
             {
                 CardIds = _revealed.Where(x => !x.IsToken).Select(x => x.Card.Id).ToList(),
@@ -152,6 +249,7 @@ namespace YGODuelSimulator.Views.Pages
             if (!_networked) { ResultText.Text = "Revealing is for online duels."; return; }
             var ids = _state.Player.Hand.Where(c => !c.IsToken).Select(c => c.Card.Id).ToList();
             _session?.Send(new RevealCardsMessage { CardIds = ids, Label = "reveals their hand" });
+            LogAction(_state.Player, "revealed their hand");
             ResultText.Text = "Revealed your hand to the opponent.";
         }
 
@@ -197,6 +295,7 @@ namespace YGODuelSimulator.Views.Pages
                 _state.MoveToSlot(card, slot);
                 card.FaceDown = p.faceDown;
                 card.Defense = p.defense;
+                LogAction(_state.FindBoard(card), $"{_pendingVerb} {NameOf(card)}");
                 if (emit) EmitPlacement(card, slot, p.faceDown, p.defense, from);
                 EndPlacement();
                 Deselect();
@@ -239,7 +338,7 @@ namespace YGODuelSimulator.Views.Pages
             if (e.Key == Key.Escape) { EndPlacement(); Deselect(); }
         }
 
-        private void BeginPlacement(bool faceDown, bool defense, params ZoneKind[] kinds)
+        private void BeginPlacement(string verb, bool faceDown, bool defense, params ZoneKind[] kinds)
         {
             CardActions.IsOpen = false;
             // Close the pile viewer so the board is visible and clickable for the drop
@@ -247,6 +346,7 @@ namespace YGODuelSimulator.Views.Pages
             PileViewer.IsOpen = false;
             if (_state.Selected is not { } card) return;
             _pending = (faceDown, defense);
+            _pendingVerb = verb;
             // Summon into the zones of whichever board owns the selected card.
             _state.HighlightTargets(_state.FindBoard(card), kinds);
         }
@@ -266,25 +366,25 @@ namespace YGODuelSimulator.Views.Pages
         // --- Action menu: placement (arm a zone) ---
 
         private void Summon_Click(object sender, RoutedEventArgs e) =>
-            BeginPlacement(faceDown: false, defense: false, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
+            BeginPlacement("Normal Summoned", faceDown: false, defense: false, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
 
         private void SetMonster_Click(object sender, RoutedEventArgs e) =>
-            BeginPlacement(faceDown: true, defense: true, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
+            BeginPlacement("Set", faceDown: true, defense: true, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
 
         private void SpecialAtk_Click(object sender, RoutedEventArgs e) =>
-            BeginPlacement(faceDown: false, defense: false, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
+            BeginPlacement("Special Summoned", faceDown: false, defense: false, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
 
         private void SpecialDef_Click(object sender, RoutedEventArgs e) =>
-            BeginPlacement(faceDown: false, defense: true, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
+            BeginPlacement("Special Summoned", faceDown: false, defense: true, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
 
         private void ActivateST_Click(object sender, RoutedEventArgs e) =>
-            BeginPlacement(faceDown: false, defense: false, ZoneKind.SpellTrap);
+            BeginPlacement("activated", faceDown: false, defense: false, ZoneKind.SpellTrap);
 
         private void SetST_Click(object sender, RoutedEventArgs e) =>
-            BeginPlacement(faceDown: true, defense: false, ZoneKind.SpellTrap);
+            BeginPlacement("Set", faceDown: true, defense: false, ZoneKind.SpellTrap);
 
         private void FieldSpell_Click(object sender, RoutedEventArgs e) =>
-            BeginPlacement(faceDown: false, defense: false, ZoneKind.Field);
+            BeginPlacement("activated a Field Spell,", faceDown: false, defense: false, ZoneKind.Field);
 
         // --- Action menu: position (act now) ---
 
@@ -299,6 +399,7 @@ namespace YGODuelSimulator.Views.Pages
                 // A flip summon is always to attack (upright) — you can't flip a
                 // monster face-up into defense position.
                 if (!c.FaceDown) c.Defense = false;
+                LogAction(_state.FindBoard(c), c.FaceDown ? $"set {NameOf(c)} face-down" : $"flipped {NameOf(c)} face-up");
 
                 if (_networked && IsMine(c) && LocateOnField(c) is { } loc)
                 {
@@ -318,6 +419,7 @@ namespace YGODuelSimulator.Views.Pages
             {
                 c.FaceDown = faceDown;
                 c.Defense = defense;
+                LogAction(_state.FindBoard(c), $"switched {NameOf(c)} to {(defense ? "defense" : "attack")} position");
                 if (_networked && IsMine(c) && LocateOnField(c) is { } loc)
                     _session?.Send(new PositionChangeMessage { Zone = loc.kind, Index = loc.index, FaceDown = faceDown, Defense = defense });
             }
@@ -341,6 +443,7 @@ namespace YGODuelSimulator.Views.Pages
         {
             if (_state.Selected is not { } c) return;
             c.Counters += delta;
+            LogAction(_state.FindBoard(c), delta > 0 ? $"added a counter to {NameOf(c)}" : $"removed a counter from {NameOf(c)}");
             if (_networked && IsMine(c) && LocateOnField(c) is { } loc)
                 _session?.Send(new CounterMessage { Zone = loc.kind, Index = loc.index, Counters = c.Counters });
         }
@@ -369,7 +472,9 @@ namespace YGODuelSimulator.Views.Pages
             var isToken = card.IsToken;
 
             ResetPosition(card);
+            var movedName = NameOf(card);
             _state.MoveToPile(card, pick(board), toTop);
+            LogAction(board, $"moved {movedName} to {PileLabel(pile, toTop)}");
 
             if (_networked && mine)
             {
@@ -426,14 +531,27 @@ namespace YGODuelSimulator.Views.Pages
 
             var board = isOpponent ? _state.Opponent : _state.Player;
             board.Shuffle();
+            LogAction(board, "shuffled their deck");
             ResultText.Text = "Shuffled deck.";
             if (_networked && board == _state.Player) _session?.Send(new ShuffleMessage());
         }
 
         // --- Turn / phase ---
 
-        private void NextPhase_Click(object sender, RoutedEventArgs e) { _state.NextPhase(); EmitTurnState(); }
-        private void EndTurn_Click(object sender, RoutedEventArgs e) { _state.EndTurn(); EmitTurnState(); }
+        private void NextPhase_Click(object sender, RoutedEventArgs e)
+        {
+            _state.NextPhase();
+            _state.Log($"— {_state.TurnSummary} —");
+            EmitTurnState();
+        }
+
+        private void EndTurn_Click(object sender, RoutedEventArgs e)
+        {
+            var ender = _state.ActiveBoard;
+            _state.EndTurn();
+            _state.Log($"{ender.DisplayName} ended their turn — {_state.TurnSummary}");
+            EmitTurnState();
+        }
 
         private void EmitTurnState()
         {
@@ -475,13 +593,17 @@ namespace YGODuelSimulator.Views.Pages
 
         private void Draw_Click(object sender, RoutedEventArgs e)
         {
-            if (SelfBoard.Draw() is null) { ResultText.Text = "Deck is empty."; return; }
+            var board = SelfBoard;
+            if (board.Draw() is null) { ResultText.Text = "Deck is empty."; return; }
+            LogAction(board, "drew a card");
             if (_networked) _session?.Send(new DrawMessage { Count = 1 });
         }
 
         private void Shuffle_Click(object sender, RoutedEventArgs e)
         {
-            SelfBoard.Shuffle();
+            var board = SelfBoard;
+            board.Shuffle();
+            LogAction(board, "shuffled their deck");
             ResultText.Text = "Shuffled.";
             if (_networked) _session?.Send(new ShuffleMessage());
         }
@@ -489,7 +611,9 @@ namespace YGODuelSimulator.Views.Pages
         private void CreateToken_Click(object sender, RoutedEventArgs e)
         {
             // A token appears in hand; the opponent only sees it once it's summoned.
-            _state.CreateToken(SelfBoard);
+            var board = SelfBoard;
+            _state.CreateToken(board);
+            LogAction(board, "created a token");
             ResultText.Text = "Token added to hand.";
         }
 
@@ -504,6 +628,7 @@ namespace YGODuelSimulator.Views.Pages
             Unreveal(card);
             ResetPosition(card);
             _state.MoveToPile(card, board.Graveyard);
+            LogAction(board, $"discarded {name}");
             // Discarding to the GY is public, so the opponent sees which card it was.
             if (_networked && !isToken)
                 _session?.Send(new HandToPileMessage { Pile = ZoneKind.Graveyard, CardId = card.Card.Id });
@@ -528,6 +653,10 @@ namespace YGODuelSimulator.Views.Pages
         {
             EndSession();
             _networked = false;
+            _state.Player.DisplayName = "Player";
+            _state.Opponent.DisplayName = "Opponent";
+            StartLog();
+            _state.Log("Offline practice started.");
             Overlay.Visibility = Visibility.Collapsed;
             ResultText.Text = "Offline practice — load a deck to begin.";
         }
@@ -647,6 +776,12 @@ namespace YGODuelSimulator.Views.Pages
             _state.Phase = DuelPhase.Main1;
             _state.ActiveSide = info.LocalGoesFirst ? PlayerSide.Player : PlayerSide.Opponent;
 
+            // Portrait names come from the usernames exchanged in the handshake.
+            _state.Player.DisplayName = _session?.LocalName ?? "You";
+            _state.Opponent.DisplayName = _session?.OpponentName ?? "Opponent";
+            StartLog();
+            _state.Log($"Duel started — {_state.Player.DisplayName} vs {_state.Opponent.DisplayName}.");
+
             // Online, decks and the opponent's LP aren't manually editable.
             SetOfflineControlsEnabled(false);
             Overlay.Visibility = Visibility.Collapsed;
@@ -702,21 +837,26 @@ namespace YGODuelSimulator.Views.Pages
             {
                 case SummonMessage s:
                     RemoveFromOppSource(s.From, s.CardId);
-                    PlaceInZone(o, s.Zone, s.Index, await BuildCardAsync(s.CardId, defense: s.Defense));
+                    var summoned = await BuildCardAsync(s.CardId, defense: s.Defense);
+                    PlaceInZone(o, s.Zone, s.Index, summoned);
+                    LogAction(o, $"Summoned {NameOf(summoned)}");
                     break;
 
                 case SetCardMessage set:
                     RemoveFromOppSource(set.From, null);
                     PlaceInZone(o, set.Zone, set.Index, new BoardCard(new Card { Name = "Card" }) { FaceDown = true, Defense = set.Defense });
+                    LogAction(o, set.Zone == ZoneKind.SpellTrap ? "Set a Spell/Trap" : "Set a monster");
                     break;
 
                 case RevealMessage r:
-                    if (o.Slot(r.Zone, r.Index) is { } rslot)
-                        rslot.Card = await BuildCardAsync(r.CardId, defense: r.Defense);
+                    var flipped = await BuildCardAsync(r.CardId, defense: r.Defense);
+                    if (o.Slot(r.Zone, r.Index) is { } rslot) rslot.Card = flipped;
+                    LogAction(o, $"revealed {NameOf(flipped)}");
                     break;
 
                 case PositionChangeMessage pc:
                     if (o.Slot(pc.Zone, pc.Index)?.Card is { } pcard) { pcard.FaceDown = pc.FaceDown; pcard.Defense = pc.Defense; }
+                    LogAction(o, "changed a card's position");
                     break;
 
                 case FieldToPileMessage f:
@@ -727,13 +867,17 @@ namespace YGODuelSimulator.Views.Pages
                         var dest = f.CardId is { } fid ? await BuildCardAsync(fid) : (moved ?? BoardCard.Hidden());
                         if (f.CardId is null) { dest.FaceDown = true; dest.Defense = false; }
                         AddToPile(o, f.Pile, dest, f.ToTop);
+                        var name = f.CardId is not null ? NameOf(dest) : "a card";
+                        LogAction(o, $"moved {name} to {PileLabel(f.Pile, f.ToTop)}");
                     }
+                    else LogAction(o, "removed a token from the field");
                     break;
 
                 case HandToPileMessage h:
                     RemoveOneHidden(o.Hand);
                     var hdest = h.CardId is { } hid ? await BuildCardAsync(hid) : BoardCard.Hidden();
                     AddToPile(o, h.Pile, hdest, h.ToTop);
+                    LogAction(o, $"moved {(h.CardId is not null ? NameOf(hdest) : "a card")} from their hand to {PileLabel(h.Pile, h.ToTop)}");
                     break;
 
                 case DrawMessage d:
@@ -742,22 +886,25 @@ namespace YGODuelSimulator.Views.Pages
                         if (o.Deck.Count > 0) o.Deck.RemoveAt(0);
                         o.Hand.Add(BoardCard.Hidden());
                     }
+                    LogAction(o, d.Count == 1 ? "drew a card" : $"drew {d.Count} cards");
                     break;
 
                 case LifePointsMessage lp:
-                    o.LifePoints = lp.LifePoints;
+                    o.LifePoints = lp.LifePoints; // the Opponent LP handler logs the change
                     break;
 
                 case TokenSummonMessage t:
                     PlaceInZone(o, t.Zone, t.Index, new BoardCard(new Card { Name = "Token" }) { IsToken = true, Defense = t.Defense });
+                    LogAction(o, "Special Summoned a token");
                     break;
 
                 case CounterMessage c:
                     if (o.Slot(c.Zone, c.Index)?.Card is { } ccard) ccard.Counters = c.Counters;
+                    LogAction(o, "changed counters on a card");
                     break;
 
                 case AnnounceMessage a:
-                    if (o.Slot(a.Zone, a.Index)?.Card is { } acard) { _state.Announce(acard, a.Verb); PointAt(acard); }
+                    if (o.Slot(a.Zone, a.Index)?.Card is { } acard) { _state.Announce(acard, a.Verb); PointAt(acard); LogAction(o, $"{a.Verb} {NameOf(acard)}"); }
                     break;
 
                 case RevealCardsMessage rc:
@@ -769,9 +916,10 @@ namespace YGODuelSimulator.Views.Pages
                     {
                         var revealed = new List<BoardCard>();
                         foreach (var id in rc.CardIds) revealed.Add(await BuildCardAsync(id));
-                        RevealViewerTitle.Text = $"{_session?.OpponentName ?? "Opponent"} {rc.Label}";
+                        RevealViewerTitle.Text = $"{o.DisplayName} {rc.Label}";
                         RevealViewerItems.ItemsSource = revealed;
                         RevealViewer.IsOpen = true;
+                        _state.Log($"{o.DisplayName} {rc.Label}");
                     }
                     break;
 
@@ -779,10 +927,20 @@ namespace YGODuelSimulator.Views.Pages
                     _state.TurnNumber = ts.TurnNumber;
                     _state.Phase = (DuelPhase)(int)ts.Phase;
                     _state.ActiveSide = ts.ActiveIsSender ? PlayerSide.Opponent : PlayerSide.Player;
+                    _state.Log($"— {_state.TurnSummary} —");
+                    break;
+
+                case ChatMessage cm:
+                    _state.LogChat(o.DisplayName, cm.Text);
+                    break;
+
+                case EmoteMessage em:
+                    o.Emote = em.Emote;
+                    if (o.Emote is { } oe) LogAction(o, EmoteVerb(oe));
                     break;
 
                 case ShuffleMessage:
-                case ChatMessage:
+                    LogAction(o, "shuffled their deck");
                     break;
             }
         }
@@ -870,6 +1028,8 @@ namespace YGODuelSimulator.Views.Pages
             _networked = false;
             _incoming.Clear();
             _revealed.Clear();
+            _state.Player.Emote = null;
+            _state.Opponent.Emote = null;
             RevealViewer.IsOpen = false;
             SetOfflineControlsEnabled(true);
         }

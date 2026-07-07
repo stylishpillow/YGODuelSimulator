@@ -9,6 +9,10 @@ namespace YGODuelSimulator.Services
     /// <summary>The phases of a turn (rulebook p.34).</summary>
     public enum DuelPhase { Draw, Standby, Main1, Battle, Main2, End }
 
+    /// <summary>One line in the duel log: a timestamp, the text, and whether it's a
+    /// typed chat line (styled differently from a system action entry).</summary>
+    public sealed record DuelLogEntry(string Time, string Text, bool IsChat);
+
     /// <summary>
     /// A two-player manual duel: two <see cref="PlayerBoard"/> halves plus the
     /// shared turn/phase tracker and the card-selection and move operations that
@@ -31,6 +35,28 @@ namespace YGODuelSimulator.Services
 
         public PlayerBoard BoardFor(PlayerSide side) =>
             side == PlayerSide.Player ? Player : Opponent;
+
+        // --- Action / chat log (a timestamped feed of everything that happens) ---
+
+        /// <summary>The running log shown in the side panel: every action and chat
+        /// line, oldest first.</summary>
+        public ObservableCollection<DuelLogEntry> LogEntries { get; } = [];
+
+        /// <summary>Records an action such as "Alice drew a card".</summary>
+        public void Log(string message) => AddEntry(new DuelLogEntry(Now(), message, IsChat: false));
+
+        /// <summary>Records a typed chat line such as "Alice: gg".</summary>
+        public void LogChat(string who, string text) =>
+            AddEntry(new DuelLogEntry(Now(), $"{who}: {text}", IsChat: true));
+
+        private void AddEntry(DuelLogEntry entry)
+        {
+            LogEntries.Add(entry);
+            // Keep the feed bounded so a long game doesn't grow without limit.
+            while (LogEntries.Count > 300) LogEntries.RemoveAt(0);
+        }
+
+        private static string Now() => DateTime.Now.ToString("HH:mm:ss");
 
         // --- Table talk: pointing at / declaring on a card (two-player cues) ---
 

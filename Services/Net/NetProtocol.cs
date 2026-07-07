@@ -52,6 +52,7 @@ public enum RpsChoice { Rock, Paper, Scissors }
 [JsonDerivedType(typeof(RevealCardsMessage), "revealCards")]
 [JsonDerivedType(typeof(TurnStateMessage), "turnState")]
 [JsonDerivedType(typeof(ChatMessage), "chat")]
+[JsonDerivedType(typeof(EmoteMessage), "emote")]
 public abstract class NetMessage { }
 
 // --- Pre-game ---
@@ -196,6 +197,13 @@ public sealed class TurnStateMessage : NetMessage
 public sealed class ChatMessage : NetMessage
 {
     public string Text { get; set; } = "";
+}
+
+/// <summary>A status emote shown on the sender's portrait ("thinking", "ok",
+/// "respond"). An empty string clears it.</summary>
+public sealed class EmoteMessage : NetMessage
+{
+    public string Emote { get; set; } = "";
 }
 
 /// <summary>Wire copy of the phase enum so the protocol doesn't depend on the
