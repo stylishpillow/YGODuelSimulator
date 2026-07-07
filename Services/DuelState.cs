@@ -26,6 +26,21 @@ namespace YGODuelSimulator.Services
 
         public int LifePoints { get; set; } = 8000;
 
+        private BoardCard? _selected;
+        /// <summary>The card the player has clicked to act on. Setting this keeps the
+        /// previously selected card's highlight in sync.</summary>
+        public BoardCard? Selected
+        {
+            get => _selected;
+            set
+            {
+                if (ReferenceEquals(_selected, value)) return;
+                if (_selected is not null) _selected.IsSelected = false;
+                _selected = value;
+                if (_selected is not null) _selected.IsSelected = true;
+            }
+        }
+
         private readonly Random _rng = new();
         private readonly CardImageService _images = new();
 
@@ -123,6 +138,19 @@ namespace YGODuelSimulator.Services
 
         private IEnumerable<ZoneSlot> AllSlots() =>
             MainMonsterZones.Concat(ExtraMonsterZones).Concat(SpellTrapZones).Append(FieldZone);
+
+        /// <summary>Marks every empty zone of the given kinds as a valid placement
+        /// target so the board can highlight where the selected card may go.</summary>
+        public void HighlightTargets(params ZoneKind[] kinds)
+        {
+            foreach (var slot in AllSlots())
+                slot.IsTarget = slot.IsEmpty && kinds.Contains(slot.Kind);
+        }
+
+        public void ClearHighlights()
+        {
+            foreach (var slot in AllSlots()) slot.IsTarget = false;
+        }
 
         public int RollDie() => _rng.Next(1, 7);
         public bool FlipCoin() => _rng.Next(2) == 0;

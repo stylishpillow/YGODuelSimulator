@@ -36,6 +36,17 @@ namespace YGODuelSimulator.Models.Duel
             set { _defense = value; Raise(nameof(Defense)); Raise(nameof(Rotation)); }
         }
 
+        private bool _isSelected;
+        /// <summary>True while this card is the current click-selection, so the
+        /// template can draw a highlight outline.</summary>
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set { _isSelected = value; Raise(nameof(IsSelected)); Raise(nameof(SelectionVisibility)); }
+        }
+
+        public Visibility SelectionVisibility => _isSelected ? Visibility.Visible : Visibility.Collapsed;
+
         private BitmapImage? _image;
         public BitmapImage? Image
         {

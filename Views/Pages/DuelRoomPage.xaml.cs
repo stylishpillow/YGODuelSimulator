@@ -3,23 +3,21 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using YGODuelSimulator.Models.Duel;
 using YGODuelSimulator.Services;
-using YGODuelSimulator.Views.Controls;
 
 namespace YGODuelSimulator.Views.Pages
 {
     /// <summary>
-    /// Local manual duel playfield: load a deck and move cards around the board by
-    /// dragging, with right-click menus for position/flip and quick moves. Nothing
-    /// is rule-enforced.
+    /// Local manual duel playfield, driven the Dueling Book way: click a card to
+    /// select it and open an action menu, then (for placement actions) click the
+    /// highlighted destination zone. Nothing is rule-enforced.
     /// </summary>
     public partial class DuelRoomPage : Page
     {
         private readonly DuelState _state = new();
 
-        // Drag tracking.
-        private Point _pressPoint;
-        private BoardCard? _pressCard;
-        private bool _dragging;
+        // A placement armed from the action menu: the face/position to apply and
+        // which zone kinds are valid destinations. Null when nothing is pending.
+        private (bool faceDown, bool defense, ZoneKind[] kinds)? _pending;
 
         public DuelRoomPage()
         {
@@ -29,65 +27,142 @@ namespace YGODuelSimulator.Views.Pages
             UpdateLp();
         }
 
-        // --- Dragging a card / left-click to inspect ---
+        // --- Selection & action menu ---
 
-        private void Card_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        // Left-click just selects / points at a card (the game is two-player, so a
+        // click is "I'm looking at this one") and shows it in the inspector.
+        private void Card_Click(object sender, MouseButtonEventArgs e)
         {
-            _pressCard = (sender as FrameworkElement)?.DataContext as BoardCard;
-            _pressPoint = e.GetPosition(null);
-            _dragging = false;
+            if ((sender as FrameworkElement)?.DataContext is not BoardCard card) return;
+
+            _state.Selected = card;
+            Preview.Show(card.Card);
+            e.Handled = true;
         }
 
-        private void Card_MouseMove(object sender, MouseEventArgs e)
+        // Right-click selects the card and opens the action menu at the cursor.
+        private void Card_RightClick(object sender, MouseButtonEventArgs e)
         {
-            if (e.LeftButton != MouseButtonState.Pressed || _pressCard is null || _dragging) return;
+            if ((sender as FrameworkElement)?.DataContext is not BoardCard card) return;
 
-            var p = e.GetPosition(null);
-            if (Math.Abs(p.X - _pressPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
-                Math.Abs(p.Y - _pressPoint.Y) < SystemParameters.MinimumVerticalDragDistance)
-                return;
-
-            _dragging = true;
-            var data = new DataObject(typeof(BoardCard), _pressCard);
-            DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
-            _pressCard = null;
+            _state.Selected = card;
+            Preview.Show(card.Card);
+            CardActions.IsOpen = true;
+            e.Handled = true;
         }
 
-        private void Card_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        private void Zone_Click(object sender, MouseButtonEventArgs e)
         {
-            if (!_dragging && _pressCard is not null) Preview.Show(_pressCard.Card);
-            _pressCard = null;
-            _dragging = false;
-        }
+            if ((sender as FrameworkElement)?.DataContext is not ZoneSlot slot) return;
 
-        // --- Drop targets ---
-
-        private void Zone_Drop(object sender, DragEventArgs e)
-        {
-            if ((sender as FrameworkElement)?.DataContext is ZoneSlot slot &&
-                e.Data.GetData(typeof(BoardCard)) is BoardCard card)
+            // Only meaningful while placing a card into a matching, empty zone.
+            if (_pending is { } p && slot.IsEmpty && p.kinds.Contains(slot.Kind) &&
+                _state.Selected is { } card)
             {
                 _state.MoveToSlot(card, slot);
+                card.FaceDown = p.faceDown;
+                card.Defense = p.defense;
+                EndPlacement();
+                Deselect();
+                e.Handled = true;
             }
-            e.Handled = true;
         }
 
-        private void Pile_Drop(object sender, DragEventArgs e)
+        private void Playmat_Click(object sender, MouseButtonEventArgs e)
         {
-            if ((sender as FrameworkElement)?.Tag is not string tag ||
-                e.Data.GetData(typeof(BoardCard)) is not BoardCard card)
-                return;
+            // A click that reached the playmat background (not a card or zone)
+            // cancels the current selection / pending placement.
+            EndPlacement();
+            Deselect();
+        }
 
-            ResetPosition(card);
-            switch (tag)
+        private void Page_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape) { EndPlacement(); Deselect(); }
+        }
+
+        private void BeginPlacement(bool faceDown, bool defense, params ZoneKind[] kinds)
+        {
+            CardActions.IsOpen = false;
+            if (_state.Selected is null) return;
+            _pending = (faceDown, defense, kinds);
+            _state.HighlightTargets(kinds);
+        }
+
+        private void EndPlacement()
+        {
+            _pending = null;
+            _state.ClearHighlights();
+        }
+
+        private void Deselect()
+        {
+            _state.Selected = null;
+            CardActions.IsOpen = false;
+        }
+
+        // --- Action menu: placement (arm a zone) ---
+
+        private void Summon_Click(object sender, RoutedEventArgs e) =>
+            BeginPlacement(faceDown: false, defense: false, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
+
+        private void SetMonster_Click(object sender, RoutedEventArgs e) =>
+            BeginPlacement(faceDown: true, defense: true, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
+
+        private void SpecialAtk_Click(object sender, RoutedEventArgs e) =>
+            BeginPlacement(faceDown: false, defense: false, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
+
+        private void SpecialDef_Click(object sender, RoutedEventArgs e) =>
+            BeginPlacement(faceDown: false, defense: true, ZoneKind.MainMonster, ZoneKind.ExtraMonster);
+
+        private void ActivateST_Click(object sender, RoutedEventArgs e) =>
+            BeginPlacement(faceDown: false, defense: false, ZoneKind.SpellTrap);
+
+        private void SetST_Click(object sender, RoutedEventArgs e) =>
+            BeginPlacement(faceDown: true, defense: false, ZoneKind.SpellTrap);
+
+        private void FieldSpell_Click(object sender, RoutedEventArgs e) =>
+            BeginPlacement(faceDown: false, defense: false, ZoneKind.Field);
+
+        // --- Action menu: position (act now) ---
+
+        private void SelAttack_Click(object sender, RoutedEventArgs e) => SetPosition(faceDown: false, defense: false);
+        private void SelDefense_Click(object sender, RoutedEventArgs e) => SetPosition(faceDown: false, defense: true);
+
+        private void SelFlip_Click(object sender, RoutedEventArgs e)
+        {
+            if (_state.Selected is { } c)
             {
-                case "gy": _state.MoveToPile(card, _state.Graveyard); break;
-                case "ban": _state.MoveToPile(card, _state.Banished); break;
-                case "hand": _state.MoveToPile(card, _state.Hand); break;
-                case "deck": _state.MoveToPile(card, _state.Deck); break;
-                case "extra": _state.MoveToPile(card, _state.ExtraDeck); break;
+                c.FaceDown = !c.FaceDown;
+                // A flip summon is always to attack (upright) — you can't flip a
+                // monster face-up into defense position.
+                if (!c.FaceDown) c.Defense = false;
             }
-            e.Handled = true;
+            CardActions.IsOpen = false;
+        }
+
+        private void SetPosition(bool faceDown, bool defense)
+        {
+            if (_state.Selected is { } c) { c.FaceDown = faceDown; c.Defense = defense; }
+            CardActions.IsOpen = false;
+        }
+
+        // --- Action menu: move to a pile (act now) ---
+
+        private void SelToHand_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Hand);
+        private void SelToGrave_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Graveyard);
+        private void SelToBanish_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Banished);
+        private void SelToDeckTop_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Deck, toTop: true);
+        private void SelToDeckBottom_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.Deck);
+        private void SelToExtra_Click(object sender, RoutedEventArgs e) => MoveSelected(_state.ExtraDeck);
+
+        private void MoveSelected(System.Collections.ObjectModel.ObservableCollection<BoardCard> pile, bool toTop = false)
+        {
+            if (_state.Selected is not { } card) return;
+            ResetPosition(card);
+            _state.MoveToPile(card, pile, toTop);
+            EndPlacement();
+            Deselect();
         }
 
         // --- Pile viewer ---
@@ -109,50 +184,13 @@ namespace YGODuelSimulator.Views.Pages
             PileViewerTitle.Text = title;
             PileViewerItems.ItemsSource = source;
             PileViewer.IsOpen = true;
+            e.Handled = true;
         }
-
-        // --- Right-click card actions ---
-
-        private static BoardCard? CardOf(object sender) =>
-            (sender as FrameworkElement)?.DataContext as BoardCard;
 
         private static void ResetPosition(BoardCard card)
         {
             card.FaceDown = false;
             card.Defense = false;
-        }
-
-        private void ToAttack_Click(object sender, RoutedEventArgs e)
-        {
-            if (CardOf(sender) is { } c) { c.FaceDown = false; c.Defense = false; }
-        }
-
-        private void ToDefense_Click(object sender, RoutedEventArgs e)
-        {
-            if (CardOf(sender) is { } c) { c.FaceDown = false; c.Defense = true; }
-        }
-
-        private void SetFaceDown_Click(object sender, RoutedEventArgs e)
-        {
-            if (CardOf(sender) is { } c) { c.FaceDown = true; c.Defense = false; }
-        }
-
-        private void Flip_Click(object sender, RoutedEventArgs e)
-        {
-            if (CardOf(sender) is { } c) c.FaceDown = !c.FaceDown;
-        }
-
-        private void ToGrave_Click(object sender, RoutedEventArgs e) => MoveCard(sender, _state.Graveyard);
-        private void ToBanish_Click(object sender, RoutedEventArgs e) => MoveCard(sender, _state.Banished);
-        private void ToHand_Click(object sender, RoutedEventArgs e) => MoveCard(sender, _state.Hand);
-        private void ToDeckTop_Click(object sender, RoutedEventArgs e) => MoveCard(sender, _state.Deck, toTop: true);
-        private void ToDeckBottom_Click(object sender, RoutedEventArgs e) => MoveCard(sender, _state.Deck);
-
-        private void MoveCard(object sender, System.Collections.ObjectModel.ObservableCollection<BoardCard> pile, bool toTop = false)
-        {
-            if (CardOf(sender) is not { } card) return;
-            ResetPosition(card);
-            _state.MoveToPile(card, pile, toTop);
         }
 
         // --- Toolbar ---
