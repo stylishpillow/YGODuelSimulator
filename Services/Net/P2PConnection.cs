@@ -61,7 +61,13 @@ public sealed class P2PConnection : IDisposable
         _client.NoDelay = true;
         _stream = client.GetStream();
         _cts = new CancellationTokenSource();
-        _ = ReceiveLoopAsync(_cts.Token);
+    }
+
+    /// <summary>Begins reading messages. Call this only after subscribing to
+    /// <see cref="MessageReceived"/>, so the very first message isn't missed.</summary>
+    public void Start()
+    {
+        if (_cts is not null) _ = ReceiveLoopAsync(_cts.Token);
     }
 
     public async Task SendAsync(NetMessage message)
