@@ -9,13 +9,16 @@ namespace YGODuelSimulator.Services
     /// <summary>The phases of a turn (rulebook p.34).</summary>
     public enum DuelPhase { Draw, Standby, Main1, Battle, Main2, End }
 
-    /// <summary>Who a log line is attributed to, for colour-coding: neutral system
-    /// actions, the local player's chat (blue), or the opponent's chat (red).</summary>
+    /// <summary>Who a log line is attributed to, for colour-coding: a structural/system
+    /// line (neutral), the local player (blue), or the opponent (red). Both actions and
+    /// chat are coloured by side; only truly shared lines are <see cref="System"/>.</summary>
     public enum DuelLogSide { System, Player, Opponent }
 
-    /// <summary>One line in the duel log: a timestamp, the text, and its side (which
-    /// drives the colour — system actions are neutral, chat is blue/red).</summary>
-    public sealed record DuelLogEntry(string Time, string Text, DuelLogSide Side);
+    /// <summary>One line in the duel log: a timestamp, the text, its side (which drives
+    /// the colour — system lines are neutral, a player's are blue/red), and whether it's
+    /// a chat line (chat is emphasised so it stands out from action lines of the same
+    /// colour).</summary>
+    public sealed record DuelLogEntry(string Time, string Text, DuelLogSide Side, bool Chat = false);
 
     /// <summary>
     /// A two-player manual duel: two <see cref="PlayerBoard"/> halves plus the
@@ -46,12 +49,17 @@ namespace YGODuelSimulator.Services
         /// line, oldest first.</summary>
         public ObservableCollection<DuelLogEntry> LogEntries { get; } = [];
 
-        /// <summary>Records a neutral action such as "Alice drew a card".</summary>
+        /// <summary>Records a neutral, shared line such as a turn/phase change.</summary>
         public void Log(string message) => AddEntry(new DuelLogEntry(Now(), message, DuelLogSide.System));
 
-        /// <summary>Records a typed chat line such as "Alice: gg", coloured by side.</summary>
+        /// <summary>Records a line attributed to a side, coloured accordingly (an action
+        /// such as "Alice Summoned Dark Magician").</summary>
+        public void Log(string message, DuelLogSide side) => AddEntry(new DuelLogEntry(Now(), message, side));
+
+        /// <summary>Records a typed chat line such as "Alice: gg", coloured by side and
+        /// emphasised so it reads apart from action lines.</summary>
         public void LogChat(string who, string text, DuelLogSide side) =>
-            AddEntry(new DuelLogEntry(Now(), $"{who}: {text}", side));
+            AddEntry(new DuelLogEntry(Now(), $"{who}: {text}", side, Chat: true));
 
         private void AddEntry(DuelLogEntry entry)
         {

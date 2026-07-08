@@ -60,6 +60,16 @@ namespace YGODuelSimulator.Views.Pages
         // Cards currently revealed to the opponent (single-card reveals).
         private readonly HashSet<BoardCard> _revealed = new();
 
+        // End-of-duel state. A duel ends when someone concedes / admits defeat; the
+        // end screen then offers a rematch or a quit to the menu.
+        private GameStartInfo? _gameInfo;            // last networked setup, reused for a rematch
+        private Deck? _playerDeckSource;             // last decks loaded offline, reused for a rematch
+        private Deck? _opponentDeckSource;
+        private bool _duelOver;
+        private bool _iLost;                         // did *I* lose the last duel (loser goes first on rematch)
+        private bool _localWantsRematch;
+        private bool _remoteWantsRematch;
+
         public DuelRoomPage()
         {
             InitializeComponent();
@@ -95,8 +105,11 @@ namespace YGODuelSimulator.Views.Pages
 
         // --- Game log helpers ---
 
-        /// <summary>Logs an action attributed to a player, e.g. "Alice drew a card".</summary>
-        private void LogAction(PlayerBoard actor, string verb) => _state.Log($"{actor.DisplayName} {verb}");
+        /// <summary>Logs an action attributed to a player, e.g. "Alice drew a card",
+        /// coloured by whose action it is (my board blue, the opponent's red).</summary>
+        private void LogAction(PlayerBoard actor, string verb) =>
+            _state.Log($"{actor.DisplayName} {verb}",
+                actor.Side == PlayerSide.Player ? DuelLogSide.Player : DuelLogSide.Opponent);
 
         /// <summary>The card's name for the log, or a neutral word for tokens.</summary>
         private static string NameOf(BoardCard card) => card.IsToken ? "a token" : card.Name;
@@ -768,20 +781,63 @@ namespace YGODuelSimulator.Views.Pages
             e.Handled = true;
         }
 
-        // Right-click a deck pile → Shuffle. Online you can only shuffle your own deck.
-        private void ShuffleDeck_Click(object sender, RoutedEventArgs e)
+        // Which deck the DeckActions menu was opened over (true = opponent's deck).
+        private bool _deckMenuIsOpponent;
+
+        // Right-click a deck pile → the deck menu (Shuffle + surrender), opened at the
+        // cursor and styled like the card menus. Online you can only act on your own deck,
+        // so the opponent's deck offers nothing and the menu doesn't open there.
+        private void Deck_RightClick(object sender, MouseButtonEventArgs e)
         {
-            if ((sender as MenuItem)?.Parent is not ContextMenu cm) return;
-            if (cm.PlacementTarget is not FrameworkElement { Tag: string tag }) return;
+            if ((sender as FrameworkElement)?.Tag is not string tag) return;
+            e.Handled = true;
 
-            var isOpponent = tag.StartsWith("o:");
-            if (_networked && isOpponent) return;
+            _deckMenuIsOpponent = tag.StartsWith("o:");
+            var isOwn = !_deckMenuIsOpponent;
+            // Offline you may shuffle either deck; online only your own.
+            var canShuffle = isOwn || !_networked;
 
-            var board = isOpponent ? _state.Opponent : _state.Player;
+            DeckShuffleButton.Visibility = canShuffle ? Visibility.Visible : Visibility.Collapsed;
+            DeckSurrenderGroup.Visibility = isOwn ? Visibility.Visible : Visibility.Collapsed;
+
+            if (!canShuffle && !isOwn) return; // the opponent's deck online: nothing to offer
+            DeckActions.IsOpen = true;
+        }
+
+        private void DeckShuffle_Click(object sender, RoutedEventArgs e)
+        {
+            DeckActions.IsOpen = false;
+            if (_networked && _deckMenuIsOpponent) return;
+
+            var board = _deckMenuIsOpponent ? _state.Opponent : _state.Player;
             board.Shuffle();
             LogAction(board, "shuffled their deck");
             ResultText.Text = "Shuffled deck.";
             if (_networked && board == _state.Player) _session?.Send(new ShuffleMessage());
+        }
+
+        private void Concede_Click(object sender, RoutedEventArgs e) => Surrender("conceded");
+        private void AdmitDefeat_Click(object sender, RoutedEventArgs e) => Surrender("admitted defeat");
+
+        // Surrender the duel — a table-talk gesture (no rules engine): log it, tell the
+        // opponent online so they see they've won, then raise the end screen.
+        private void Surrender(string verb)
+        {
+            DeckActions.IsOpen = false;
+            if (_duelOver) return;
+            var me = _state.Player;
+            LogAction(me, verb);
+            _iLost = true;
+            if (_networked)
+            {
+                _session?.Send(new ConcedeMessage { Verb = verb });
+                EndDuel("You lost", $"You {verb}. {_state.Opponent.DisplayName} wins.");
+            }
+            else
+            {
+                // Hot-seat: the Player board surrenders, so the Opponent wins.
+                EndDuel($"{_state.Opponent.DisplayName} wins", $"{me.DisplayName} {verb}.");
+            }
         }
 
         // --- Turn / phase ---
@@ -826,7 +882,10 @@ namespace YGODuelSimulator.Views.Pages
             }
             try
             {
-                await board.LoadDeckAsync(YdkFile.Load(name));
+                var deck = YdkFile.Load(name);
+                await board.LoadDeckAsync(deck);
+                // Remember it so an offline rematch can reload the same deck.
+                if (board.Side == PlayerSide.Player) _playerDeckSource = deck; else _opponentDeckSource = deck;
                 var who = board.Side == PlayerSide.Player ? "Player" : "Opponent";
                 ResultText.Text = $"Loaded \"{name}\" for {who}.";
             }
@@ -989,6 +1048,9 @@ namespace YGODuelSimulator.Views.Pages
         private void RefreshOverlay()
         {
             if (_session is null) return;
+            // While the end screen is up the session is still InDuel; don't let a stray
+            // session event pull the overlay back to a blank in-duel state.
+            if (_duelOver && _session.Phase == MatchPhase.InDuel) return;
             switch (_session.Phase)
             {
                 case MatchPhase.Lobby:
@@ -1032,13 +1094,24 @@ namespace YGODuelSimulator.Views.Pages
         {
             Overlay.Visibility = Visibility.Visible;
             foreach (var p in new FrameworkElement[]
-                { EntryPanel, InternetPanel, LobbyPanel, ConnectingPanel, DeckPanel, RpsPanel, OrderPanel, DisconnectedPanel })
+                { EntryPanel, InternetPanel, LobbyPanel, ConnectingPanel, DeckPanel, RpsPanel, OrderPanel, DisconnectedPanel, EndPanel })
                 p.Visibility = ReferenceEquals(p, panel) ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private async void OnGameStarting(GameStartInfo info)
+        private void OnGameStarting(GameStartInfo info)
         {
+            _gameInfo = info;
+            _ = BeginDuelAsync(info.LocalGoesFirst);
+        }
+
+        // Sets up (or resets, for a rematch) a networked duel from the stored GameStartInfo.
+        private async Task BeginDuelAsync(bool localGoesFirst)
+        {
+            if (_gameInfo is not { } info) return;
             _networked = true;
+            ClearDuelEnd();
+            Overlay.Visibility = Visibility.Collapsed;
+            EndPanel.Visibility = Visibility.Collapsed;
 
             // Set up the opponent shadow and turn state synchronously first, so any
             // early inbound message applies to a ready board (not one reset later).
@@ -1048,18 +1121,21 @@ namespace YGODuelSimulator.Views.Pages
                 extraCount: info.RemoteDeck.ExtraIds.Count);
             _state.TurnNumber = 1;
             _state.Phase = DuelPhase.Main1;
-            _state.ActiveSide = info.LocalGoesFirst ? PlayerSide.Player : PlayerSide.Opponent;
+            _state.ActiveSide = localGoesFirst ? PlayerSide.Player : PlayerSide.Opponent;
 
             // Portrait names come from the usernames exchanged in the handshake.
             _state.Player.DisplayName = _session?.LocalName ?? "You";
             _state.Opponent.DisplayName = _session?.OpponentName ?? "Opponent";
+            // Reset LP for a fresh game (a rematch reuses these boards). Suppress logging
+            // of the reset itself; StartLog re-enables it from a clean 8000 baseline.
+            _loggingLp = false;
+            _state.Player.LifePoints = 8000;
             StartLog();
             _state.Log($"Duel started — {_state.Player.DisplayName} vs {_state.Opponent.DisplayName}.");
 
             // Online, decks and the opponent's LP aren't manually editable.
             SetOfflineControlsEnabled(false);
-            Overlay.Visibility = Visibility.Collapsed;
-            ResultText.Text = info.LocalGoesFirst
+            ResultText.Text = localGoesFirst
                 ? "You go first."
                 : $"{_session?.OpponentName ?? "Opponent"} goes first.";
 
@@ -1068,6 +1144,89 @@ namespace YGODuelSimulator.Views.Pages
             myDeck.Main.AddRange(info.LocalDeck.MainIds);
             myDeck.Extra.AddRange(info.LocalDeck.ExtraIds);
             await _state.Player.LoadDeckAsync(myDeck);
+        }
+
+        // --- End of duel: result screen, rematch, quit ---
+
+        // Raises the end screen over the board. Reachable only via a concede / admit-defeat.
+        private void EndDuel(string result, string detail)
+        {
+            _duelOver = true;
+            _localWantsRematch = false;
+            _remoteWantsRematch = false;
+            // Popups float above the overlay — close any so they don't hover the end screen.
+            ViewMenu.IsOpen = CardActions.IsOpen = DeckActions.IsOpen = PileViewer.IsOpen = RevealViewer.IsOpen = false;
+            EndResultText.Text = result;
+            EndDetailText.Text = detail;
+            EndRematchStatus.Text = "";
+            RematchButton.IsEnabled = true;
+            ShowOnlyPanel(EndPanel);
+        }
+
+        private void ClearDuelEnd()
+        {
+            _duelOver = false;
+            _localWantsRematch = false;
+            _remoteWantsRematch = false;
+        }
+
+        private void Rematch_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_duelOver) return;
+            if (!_networked) { _ = RestartOfflineAsync(); return; }
+            if (_localWantsRematch) return;
+
+            _localWantsRematch = true;
+            RematchButton.IsEnabled = false;
+            _session?.Send(new RematchMessage());
+            UpdateRematchStatus();
+            TryStartRematch();
+        }
+
+        // Both sides agreed: restart with the same decks; the previous loser goes first.
+        private void TryStartRematch()
+        {
+            if (!_duelOver || !_localWantsRematch || !_remoteWantsRematch) return;
+            _ = BeginDuelAsync(localGoesFirst: _iLost);
+        }
+
+        private void UpdateRematchStatus()
+        {
+            var opp = _state.Opponent.DisplayName;
+            EndRematchStatus.Text = (_localWantsRematch, _remoteWantsRematch) switch
+            {
+                (true, false) => $"Waiting for {opp}…",
+                (false, true) => $"{opp} wants a rematch.",
+                _ => "",
+            };
+        }
+
+        // Offline restart: reset both boards to a fresh game, reloading the same decks.
+        private async Task RestartOfflineAsync()
+        {
+            ClearDuelEnd();
+            EndPanel.Visibility = Visibility.Collapsed;
+            Overlay.Visibility = Visibility.Collapsed;
+
+            _loggingLp = false;
+            _state.Player.LifePoints = 8000;
+            _state.Opponent.LifePoints = 8000;
+            _state.TurnNumber = 1;
+            _state.Phase = DuelPhase.Main1;
+            _state.ActiveSide = PlayerSide.Player;
+            StartLog();
+            _state.Log("New duel started.");
+            ResultText.Text = "New duel.";
+
+            if (_playerDeckSource is { } pd) await _state.Player.LoadDeckAsync(pd);
+            if (_opponentDeckSource is { } od) await _state.Opponent.LoadDeckAsync(od);
+        }
+
+        private void QuitDuel_Click(object sender, RoutedEventArgs e)
+        {
+            EndSession();
+            ClearDuelEnd();
+            ShowOnlyPanel(EntryPanel);
         }
 
         private void SetupOpponentShadow(int deckCount, int handCount, int extraCount)
@@ -1193,7 +1352,7 @@ namespace YGODuelSimulator.Views.Pages
                         RevealViewerTitle.Text = $"{o.DisplayName} {rc.Label}";
                         RevealViewerItems.ItemsSource = revealed;
                         RevealViewer.IsOpen = true;
-                        _state.Log($"{o.DisplayName} {rc.Label}");
+                        LogAction(o, rc.Label);
                     }
                     break;
 
@@ -1206,6 +1365,20 @@ namespace YGODuelSimulator.Views.Pages
 
                 case ChatMessage cm:
                     _state.LogChat(o.DisplayName, cm.Text, DuelLogSide.Opponent);
+                    break;
+
+                case ConcedeMessage cc:
+                    if (!_duelOver)
+                    {
+                        LogAction(o, $"{cc.Verb} — you win!");
+                        _iLost = false;
+                        EndDuel("You win!", $"{o.DisplayName} {cc.Verb}.");
+                    }
+                    break;
+
+                case RematchMessage:
+                    _remoteWantsRematch = true;
+                    if (_duelOver) { UpdateRematchStatus(); TryStartRematch(); }
                     break;
 
                 case EmoteMessage em:
@@ -1340,9 +1513,12 @@ namespace YGODuelSimulator.Views.Pages
             _networked = false;
             _incoming.Clear();
             _revealed.Clear();
+            _gameInfo = null;
+            ClearDuelEnd();
             _state.Player.Emote = null;
             _state.Opponent.Emote = null;
             RevealViewer.IsOpen = false;
+            DeckActions.IsOpen = false;
             SetOfflineControlsEnabled(true);
         }
     }

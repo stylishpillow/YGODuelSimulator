@@ -217,17 +217,24 @@
 
         <!-- One line of the game log: dim timestamp + text; chat lines are brighter. -->
         <DataTemplate x:Key="LogEntryTemplate">
-            <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,1" Foreground="#C6D2DC">
+            <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,1">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
+                        <!-- Base colour as a Setter (not a local attribute on the TextBlock),
+                             so the Player/Opponent triggers below can override it — a local
+                             value would outrank the triggers and defeat the colour-coding. -->
+                        <Setter Property="Foreground" Value="#C6D2DC"/>
                         <Style.Triggers>
-                            <!-- Chat is colour-coded: the local player blue, the opponent red. -->
+                            <!-- Lines are colour-coded by side: the local player blue, the
+                                 opponent red (both actions and chat); system lines stay grey. -->
                             <DataTrigger Binding="{Binding Side}" Value="Player">
                                 <Setter Property="Foreground" Value="#6FB4FF"/>
-                                <Setter Property="FontWeight" Value="SemiBold"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Side}" Value="Opponent">
                                 <Setter Property="Foreground" Value="#FF7A7A"/>
+                            </DataTrigger>
+                            <!-- Chat is emphasised so it reads apart from action lines. -->
+                            <DataTrigger Binding="{Binding Chat}" Value="True">
                                 <Setter Property="FontWeight" Value="SemiBold"/>
                             </DataTrigger>
                         </Style.Triggers>
@@ -390,12 +397,8 @@
                                 <ContentControl Grid.Row="0" Grid.Column="3" Content="{Binding Opponent.SpellTrapZones[2]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                 <ContentControl Grid.Row="0" Grid.Column="4" Content="{Binding Opponent.SpellTrapZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                 <ContentControl Grid.Row="0" Grid.Column="5" Content="{Binding Opponent.SpellTrapZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <Border Grid.Row="0" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="o:deck" MouseLeftButtonUp="Pile_Click">
-                                    <Border.ContextMenu>
-                                        <ContextMenu>
-                                            <MenuItem Header="Shuffle" Click="ShuffleDeck_Click"/>
-                                        </ContextMenu>
-                                    </Border.ContextMenu>
+                                <Border Grid.Row="0" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="o:deck"
+                                        MouseLeftButtonUp="Pile_Click" MouseRightButtonUp="Deck_RightClick">
                                     <Grid>
                                         <Control Template="{StaticResource CardBack}" Margin="6"/>
                                         <Border VerticalAlignment="Bottom" Background="#B0000000" CornerRadius="0,0,4,4">
@@ -497,12 +500,8 @@
                                 <ContentControl Grid.Row="1" Grid.Column="3" Content="{Binding Player.SpellTrapZones[2]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                 <ContentControl Grid.Row="1" Grid.Column="4" Content="{Binding Player.SpellTrapZones[3]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                 <ContentControl Grid.Row="1" Grid.Column="5" Content="{Binding Player.SpellTrapZones[4]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
-                                <Border Grid.Row="1" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="p:deck" MouseLeftButtonUp="Pile_Click">
-                                    <Border.ContextMenu>
-                                        <ContextMenu>
-                                            <MenuItem Header="Shuffle" Click="ShuffleDeck_Click"/>
-                                        </ContextMenu>
-                                    </Border.ContextMenu>
+                                <Border Grid.Row="1" Grid.Column="6" Style="{StaticResource PileBorder}" Tag="p:deck"
+                                        MouseLeftButtonUp="Pile_Click" MouseRightButtonUp="Deck_RightClick">
                                     <Grid>
                                         <Control Template="{StaticResource CardBack}" Margin="6"/>
                                         <Border VerticalAlignment="Bottom" Background="#B0000000" CornerRadius="0,0,4,4">
@@ -643,6 +642,26 @@
                     <ui:Button Content="To Deck (top)" HorizontalAlignment="Stretch" Margin="0,2" Click="SelToDeckTop_Click"/>
                     <ui:Button Content="To Deck (bottom)" HorizontalAlignment="Stretch" Margin="0,2" Click="SelToDeckBottom_Click"/>
                     <ui:Button Content="To Extra Deck" HorizontalAlignment="Stretch" Margin="0,2" Click="SelToExtra_Click"/>
+                </StackPanel>
+            </Border>
+        </Popup>
+
+        <!-- Deck action menu: opens at the cursor on right-click of a deck pile,
+             styled to match the card menus above. Shuffle acts on the clicked deck;
+             the surrender actions (own deck only) end the duel. -->
+        <Popup x:Name="DeckActions" StaysOpen="False" AllowsTransparency="True"
+               Placement="MousePoint" PopupAnimation="Fade">
+            <Border Background="#F0202020" BorderBrush="#60FFFFFF" BorderThickness="1"
+                    CornerRadius="6" Padding="6">
+                <StackPanel Width="160">
+                    <TextBlock Text="DECK" Foreground="#8AA" Margin="4,2" FontSize="10" FontWeight="Bold"/>
+                    <ui:Button x:Name="DeckShuffleButton" Content="Shuffle" HorizontalAlignment="Stretch" Margin="0,2" Click="DeckShuffle_Click"/>
+
+                    <StackPanel x:Name="DeckSurrenderGroup">
+                        <TextBlock Text="SURRENDER" Foreground="#8AA" Margin="4,6,4,2" FontSize="10" FontWeight="Bold"/>
+                        <ui:Button Content="Concede" HorizontalAlignment="Stretch" Margin="0,2" Click="Concede_Click"/>
+                        <ui:Button Content="Admit defeat" HorizontalAlignment="Stretch" Margin="0,2" Click="AdmitDefeat_Click"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </Popup>
@@ -801,6 +820,22 @@
                         <TextBlock x:Name="DisconnectedText" FontSize="16" HorizontalAlignment="Center"
                                    TextWrapping="Wrap" TextAlignment="Center"/>
                         <ui:Button Content="Back to menu" HorizontalAlignment="Center" Margin="0,16,0,0" Click="BackToEntry_Click"/>
+                    </StackPanel>
+
+                    <!-- Duel over: result + rematch / quit -->
+                    <StackPanel x:Name="EndPanel" Visibility="Collapsed">
+                        <TextBlock Text="Duel over" Opacity="0.6" HorizontalAlignment="Center"
+                                   FontSize="13" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="EndResultText" FontSize="30" FontWeight="Bold"
+                                   HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                                   Margin="0,4,0,0"/>
+                        <TextBlock x:Name="EndDetailText" Opacity="0.75" HorizontalAlignment="Center"
+                                   TextAlignment="Center" TextWrapping="Wrap" Margin="0,6,0,20"/>
+                        <ui:Button x:Name="RematchButton" Content="Rematch" Appearance="Primary"
+                                   HorizontalAlignment="Stretch" Margin="0,0,0,10" Click="Rematch_Click"/>
+                        <ui:Button Content="Quit to menu" HorizontalAlignment="Stretch" Click="QuitDuel_Click"/>
+                        <TextBlock x:Name="EndRematchStatus" Opacity="0.75" HorizontalAlignment="Center"
+                                   TextAlignment="Center" TextWrapping="Wrap" Margin="0,14,0,0"/>
                     </StackPanel>
                 </Grid>
             </Border>

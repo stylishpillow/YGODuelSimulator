@@ -8,7 +8,7 @@ namespace YGODuelSimulator.Services.Net;
 public static class NetProtocol
 {
     /// <summary>Bumped whenever the message shapes change; peers must match.</summary>
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
 
     public const int DiscoveryPort = 47772;   // UDP room beacons
     public const int DefaultGamePort = 47771;  // TCP duel connection
@@ -59,6 +59,8 @@ public enum RpsChoice { Rock, Paper, Scissors }
 [JsonDerivedType(typeof(EmoteMessage), "emote")]
 [JsonDerivedType(typeof(AttackMessage), "attack")]
 [JsonDerivedType(typeof(ControlSwapMessage), "controlSwap")]
+[JsonDerivedType(typeof(ConcedeMessage), "concede")]
+[JsonDerivedType(typeof(RematchMessage), "rematch")]
 public abstract class NetMessage { }
 
 // --- Pre-game ---
@@ -239,6 +241,18 @@ public sealed class ControlSwapMessage : NetMessage
     public bool FaceDown { get; set; }
     public bool Defense { get; set; }
 }
+
+/// <summary>The sender is surrendering the duel — a table-talk gesture that ends the
+/// game in the receiver's favour. <see cref="Verb"/> is the past-tense phrase for the
+/// log ("conceded", "admitted defeat").</summary>
+public sealed class ConcedeMessage : NetMessage
+{
+    public string Verb { get; set; } = "conceded";
+}
+
+/// <summary>Sent from the end screen to ask for a rematch. When both peers have sent
+/// one, each restarts the duel with the same decks (the previous loser goes first).</summary>
+public sealed class RematchMessage : NetMessage { }
 
 /// <summary>Wire copy of the phase enum so the protocol doesn't depend on the
 /// Services namespace layout (kept in sync with <c>DuelPhase</c>).</summary>
