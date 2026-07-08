@@ -59,8 +59,24 @@ public sealed class P2PConnection : IDuelConnection
     {
         _client = client;
         _client.NoDelay = true;
+        EnableKeepAlive(_client.Client);
         _stream = client.GetStream();
         _cts = new CancellationTokenSource();
+    }
+
+    /// <summary>Turns on TCP keep-alive with short probes so an abruptly-dropped peer
+    /// (a yanked cable / dead Wi-Fi, which sends no FIN) is detected in ~10s rather than
+    /// hanging for the OS default. That lets the surviving side start reconnecting too.</summary>
+    private static void EnableKeepAlive(Socket socket)
+    {
+        try
+        {
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 5);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 2);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
+        }
+        catch { /* best-effort: some platforms don't support the finer knobs */ }
     }
 
     /// <summary>Begins reading messages. Call this only after subscribing to

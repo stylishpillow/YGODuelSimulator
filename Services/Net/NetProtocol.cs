@@ -8,7 +8,7 @@ namespace YGODuelSimulator.Services.Net;
 public static class NetProtocol
 {
     /// <summary>Bumped whenever the message shapes change; peers must match.</summary>
-    public const int ProtocolVersion = 2;
+    public const int ProtocolVersion = 5;
 
     public const int DiscoveryPort = 47772;   // UDP room beacons
     public const int DefaultGamePort = 47771;  // TCP duel connection
@@ -29,6 +29,12 @@ public static class NetProtocol
 
 public enum RpsChoice { Rock, Paper, Scissors }
 
+/// <summary>Where a table-talk target sits, from the receiver's viewpoint, so they can
+/// ring the right card: on the sender's own field (the receiver's opponent shadow), on
+/// the receiver's own field (the sender pointed at one of the receiver's cards), or
+/// nowhere on a field (a hand card / not locatable).</summary>
+public enum AnnounceSide { None, SenderField, ReceiverField }
+
 /// <summary>
 /// Base type for everything sent over the TCP link. Serialized polymorphically with a
 /// "type" discriminator so a single receive loop can deserialize any message.
@@ -47,6 +53,7 @@ public enum RpsChoice { Rock, Paper, Scissors }
 [JsonDerivedType(typeof(PositionChangeMessage), "position")]
 [JsonDerivedType(typeof(FieldToPileMessage), "fieldToPile")]
 [JsonDerivedType(typeof(HandToPileMessage), "handToPile")]
+[JsonDerivedType(typeof(DeckToPileMessage), "deckToPile")]
 [JsonDerivedType(typeof(DrawMessage), "draw")]
 [JsonDerivedType(typeof(LifePointsMessage), "lp")]
 [JsonDerivedType(typeof(TokenSummonMessage), "token")]
@@ -61,6 +68,7 @@ public enum RpsChoice { Rock, Paper, Scissors }
 [JsonDerivedType(typeof(ControlSwapMessage), "controlSwap")]
 [JsonDerivedType(typeof(ConcedeMessage), "concede")]
 [JsonDerivedType(typeof(RematchMessage), "rematch")]
+[JsonDerivedType(typeof(LeaveMessage), "leave")]
 public abstract class NetMessage { }
 
 // --- Pre-game ---
@@ -156,6 +164,16 @@ public sealed class DrawMessage : NetMessage
     public int Count { get; set; } = 1;
 }
 
+/// <summary>The sender milled a card off the top or bottom of their own Deck into a pile
+/// (e.g. Lightsworn sending to the Graveyard). The card becomes public there, so its id
+/// is included for the receiver to rebuild it.</summary>
+public sealed class DeckToPileMessage : NetMessage
+{
+    public long CardId { get; set; }
+    public ZoneKind Pile { get; set; } = ZoneKind.Graveyard;
+    public bool FromBottom { get; set; }
+}
+
 public sealed class LifePointsMessage : NetMessage
 {
     public int LifePoints { get; set; }
@@ -188,6 +206,11 @@ public sealed class RevealCardsMessage : NetMessage
 public sealed class AnnounceMessage : NetMessage
 {
     public string Verb { get; set; } = "";
+    /// <summary>Public description of the target for the log/banner — its name if it's
+    /// face-up, else a generic phrase ("a set card on the field" / "a card in hand").</summary>
+    public string Target { get; set; } = "";
+    /// <summary>Which field the target sits on, so the receiver rings the right card.</summary>
+    public AnnounceSide Side { get; set; } = AnnounceSide.None;
     public ZoneKind Zone { get; set; }
     public int Index { get; set; }
 }
@@ -253,6 +276,11 @@ public sealed class ConcedeMessage : NetMessage
 /// <summary>Sent from the end screen to ask for a rematch. When both peers have sent
 /// one, each restarts the duel with the same decks (the previous loser goes first).</summary>
 public sealed class RematchMessage : NetMessage { }
+
+/// <summary>Sent when a peer deliberately leaves (quits to the menu). It tells the other
+/// side the match is over so they don't sit waiting to reconnect — an abrupt drop, by
+/// contrast, has no Leave and triggers the reconnect flow.</summary>
+public sealed class LeaveMessage : NetMessage { }
 
 /// <summary>Wire copy of the phase enum so the protocol doesn't depend on the
 /// Services namespace layout (kept in sync with <c>DuelPhase</c>).</summary>

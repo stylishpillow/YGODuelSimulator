@@ -627,6 +627,7 @@
                     <TextBlock Text="POSITION" Foreground="#8AA" Margin="4,6,4,2" FontSize="10" FontWeight="Bold"/>
                     <ui:Button Content="To Attack" HorizontalAlignment="Stretch" Margin="0,2" Click="SelAttack_Click"/>
                     <ui:Button Content="To Defense" HorizontalAlignment="Stretch" Margin="0,2" Click="SelDefense_Click"/>
+                    <ui:Button Content="Flip Summon" HorizontalAlignment="Stretch" Margin="0,2" Click="SelFlipSummon_Click"/>
                     <ui:Button Content="Flip" HorizontalAlignment="Stretch" Margin="0,2" Click="SelFlip_Click"/>
 
                     <TextBlock Text="COUNTERS" Foreground="#8AA" Margin="4,6,4,2" FontSize="10" FontWeight="Bold"/>
@@ -654,8 +655,12 @@
             <Border Background="#F0202020" BorderBrush="#60FFFFFF" BorderThickness="1"
                     CornerRadius="6" Padding="6">
                 <StackPanel Width="160">
-                    <TextBlock Text="DECK" Foreground="#8AA" Margin="4,2" FontSize="10" FontWeight="Bold"/>
-                    <ui:Button x:Name="DeckShuffleButton" Content="Shuffle" HorizontalAlignment="Stretch" Margin="0,2" Click="DeckShuffle_Click"/>
+                    <StackPanel x:Name="DeckPlayGroup">
+                        <TextBlock Text="DECK" Foreground="#8AA" Margin="4,2" FontSize="10" FontWeight="Bold"/>
+                        <ui:Button Content="Shuffle" HorizontalAlignment="Stretch" Margin="0,2" Click="DeckShuffle_Click"/>
+                        <ui:Button Content="Mill top → GY" HorizontalAlignment="Stretch" Margin="0,2" Click="DeckMillTop_Click"/>
+                        <ui:Button Content="Mill bottom → GY" HorizontalAlignment="Stretch" Margin="0,2" Click="DeckMillBottom_Click"/>
+                    </StackPanel>
 
                     <StackPanel x:Name="DeckSurrenderGroup">
                         <TextBlock Text="SURRENDER" Foreground="#8AA" Margin="4,6,4,2" FontSize="10" FontWeight="Bold"/>

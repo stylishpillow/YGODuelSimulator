@@ -1,10 +1,11 @@
 using System.ComponentModel;
+using System.Net;
 using System.Windows.Threading;
 using YGODuelSimulator.Services;
 
 namespace YGODuelSimulator.Services.Net;
 
-public enum MatchPhase { Idle, Lobby, Connecting, DeckSelect, Rps, ChooseOrder, InDuel, Disconnected }
+public enum MatchPhase { Idle, Lobby, Connecting, DeckSelect, Rps, ChooseOrder, InDuel, Reconnecting, Disconnected }
 
 /// <summary>
 /// Drives a networked match from discovery through the pre-game handshake and into
@@ -18,6 +19,16 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
     private readonly LanDiscovery _discovery;
     private IDuelConnection? _connection;
     private CancellationTokenSource? _connectCts;
+
+    // How we connected, remembered so a dropped in-duel link can be rebuilt without
+    // redoing the pre-game handshake (the boards are preserved in memory on both sides).
+    private bool _isRelay;
+    private string? _relayCode;
+    private IPAddress? _lanAddress;
+    private int _lanPort;
+    private bool _duelStarted;               // reconnect only applies once a duel is underway
+    private bool _leaving;                    // a deliberate quit — don't try to reconnect
+    private CancellationTokenSource? _reconnectCts;
 
     public string LocalName { get; }
     public bool IsHost { get; private set; }
@@ -57,6 +68,10 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
     public event Action<NetMessage>? DuelMessage;
     /// <summary>Raised once both sides are ready to enter the duel.</summary>
     public event Action<GameStartInfo>? GameStarting;
+    /// <summary>Raised when the link drops mid-duel and reconnection begins.</summary>
+    public event Action? Reconnecting;
+    /// <summary>Raised when a dropped duel link is re-established and play resumes.</summary>
+    public event Action? Reconnected;
 
     public DuelSession(Dispatcher dispatcher, string localName)
     {
@@ -80,6 +95,8 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
     public async void Host()
     {
         IsHost = true;
+        _isRelay = false;
+        _lanPort = NetProtocol.DefaultGamePort;
         Phase = MatchPhase.Connecting;
         SetStatus("Waiting for an opponent to join…");
 
@@ -108,6 +125,9 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
     public async void Join(DiscoveredRoom room)
     {
         IsHost = false;
+        _isRelay = false;
+        _lanAddress = room.Address;
+        _lanPort = room.GamePort;
         Phase = MatchPhase.Connecting;
         SetStatus($"Connecting to {room.HostName}…");
         _discovery.Stop();
@@ -130,7 +150,9 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
     public async void HostOnline()
     {
         IsHost = true;
+        _isRelay = true;
         RoomCode = GenerateRoomCode();
+        _relayCode = RoomCode;
         Raise(nameof(RoomCode));
         Phase = MatchPhase.Connecting;
         SetStatus($"Room code: {RoomCode}\nShare it with your opponent — waiting for them to join…");
@@ -159,6 +181,8 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
         }
 
         IsHost = false;
+        _isRelay = true;
+        _relayCode = code;
         Phase = MatchPhase.Connecting;
         SetStatus($"Joining room {code}…");
 
@@ -276,6 +300,7 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
     private void StartDuel()
     {
         if (_localDeck is null || _remoteDeck is null || LocalGoesFirst is not { } first) return;
+        _duelStarted = true;
         Phase = MatchPhase.InDuel;
         GameStarting?.Invoke(new GameStartInfo(_localDeck, _remoteDeck, first));
     }
@@ -314,17 +339,104 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
                 StartDuel();
                 break;
 
+            case LeaveMessage:
+                // The opponent deliberately quit — terminal, so don't reconnect.
+                _leaving = true;
+                _reconnectCts?.Cancel();
+                Phase = MatchPhase.Disconnected;
+                SetStatus($"{OpponentName ?? "Opponent"} left the duel.");
+                break;
+
             default:
-                if (Phase == MatchPhase.InDuel) DuelMessage?.Invoke(message);
+                if (Phase is MatchPhase.InDuel) DuelMessage?.Invoke(message);
                 break;
         }
     }
 
     private void OnDisconnected()
     {
-        if (Phase is MatchPhase.Idle or MatchPhase.Disconnected) return;
+        if (Phase is MatchPhase.Idle or MatchPhase.Disconnected or MatchPhase.Reconnecting) return;
+        // A drop mid-duel (not a deliberate leave) is recoverable: both sides still hold
+        // the full board in memory, so we just rebuild the transport and resume.
+        if (!_leaving && _duelStarted)
+        {
+            BeginReconnect();
+            return;
+        }
         Phase = MatchPhase.Disconnected;
         SetStatus($"{OpponentName ?? "Opponent"} disconnected.");
+    }
+
+    // --- Reconnect ---
+
+    /// <summary>Rebuilds the dropped link (same role, same address/room) and, on success,
+    /// resumes the duel in place. Retries until it connects or the window elapses.</summary>
+    private async void BeginReconnect()
+    {
+        _reconnectCts?.Cancel();
+        var cts = _reconnectCts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromSeconds(45));
+        var ct = cts.Token;
+
+        try { _connection?.Dispose(); } catch { }
+        _connection = null;
+
+        Phase = MatchPhase.Reconnecting;
+        SetStatus("Connection lost — reconnecting…");
+        Reconnecting?.Invoke();
+
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                IDuelConnection conn = (_isRelay, IsHost) switch
+                {
+                    (true, true) => await RelayConnection.HostAsync(_relayCode!, _dispatcher, ct),
+                    (true, false) => await RelayConnection.JoinAsync(_relayCode!, _dispatcher, ct),
+                    (false, true) => await P2PConnection.HostAsync(_lanPort, _dispatcher, ct),
+                    (false, false) => await P2PConnection.JoinAsync(_lanAddress!, _lanPort, _dispatcher, ct),
+                };
+                ResumeConnection(conn);
+                return;
+            }
+            catch (OperationCanceledException) { break; }
+            catch
+            {
+                // Peer not back yet (host not listening / relay room reforming) — wait, retry.
+                try { await Task.Delay(1000, ct); } catch { break; }
+            }
+        }
+
+        if (!_leaving)
+        {
+            Phase = MatchPhase.Disconnected;
+            SetStatus($"Couldn't reconnect to {OpponentName ?? "your opponent"}.");
+        }
+    }
+
+    private void ResumeConnection(IDuelConnection conn)
+    {
+        _connection = conn;
+        conn.MessageReceived += OnMessage;
+        conn.Disconnected += OnDisconnected;
+        Phase = MatchPhase.InDuel;   // DuelState was preserved on both sides — just resume
+        SetStatus(null);
+        conn.Start();
+        Reconnected?.Invoke();
+    }
+
+    /// <summary>Tell the peer we're leaving on purpose, then tear down. Flushes the Leave
+    /// before closing so the peer treats it as terminal rather than reconnecting.</summary>
+    public async void LeaveAndDispose()
+    {
+        _leaving = true;
+        _reconnectCts?.Cancel();
+        try
+        {
+            if (_connection is { } c) await c.SendAsync(new LeaveMessage());
+        }
+        catch { /* best effort */ }
+        Dispose();
     }
 
     private void Fail(string message)
@@ -342,7 +454,9 @@ public sealed class DuelSession : INotifyPropertyChanged, IDisposable
 
     public void Dispose()
     {
+        _leaving = true;
         try { _connectCts?.Cancel(); } catch { }
+        try { _reconnectCts?.Cancel(); } catch { }
         _discovery.Dispose();
         _connection?.Dispose();
     }

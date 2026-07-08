@@ -83,12 +83,10 @@ namespace YGODuelSimulator.Services
         public Visibility AnnouncementVisibility =>
             string.IsNullOrEmpty(_announcement) ? Visibility.Collapsed : Visibility.Visible;
 
-        /// <summary>Sets the banner to "&lt;owner&gt; &lt;verb&gt; &lt;card&gt;".</summary>
-        public void Announce(BoardCard card, string verb)
-        {
-            var who = FindBoard(card).Side == PlayerSide.Player ? "Player" : "Opponent";
-            Announcement = $"{who} {verb} {card.Name}";
-        }
+        /// <summary>Sets the banner to "&lt;actor&gt; &lt;verb&gt; &lt;target&gt;" — the actor is
+        /// whoever performed the gesture, not the card's owner.</summary>
+        public void Announce(string actor, string verb, string target) =>
+            Announcement = $"{actor} {verb} {target}";
 
         // --- Selection ---
 
