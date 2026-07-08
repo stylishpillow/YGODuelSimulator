@@ -51,6 +51,7 @@ namespace YGODuelSimulator.Models.Duel
                 Raise(nameof(FrontVisibility));
                 Raise(nameof(BackVisibility));
                 Raise(nameof(TokenVisibility));
+                Raise(nameof(NameFallbackVisibility));
             }
         }
 
@@ -102,8 +103,16 @@ namespace YGODuelSimulator.Models.Duel
         public BitmapImage? Image
         {
             get => _image;
-            set { _image = value; Raise(nameof(Image)); }
+            set { _image = value; Raise(nameof(Image)); Raise(nameof(NameFallbackVisibility)); }
         }
+
+        /// <summary>A face-up, non-token card whose artwork hasn't loaded (or failed to
+        /// download) shows its name as text so it stays identifiable — otherwise the
+        /// image control renders a blank rectangle. This matters most for an opponent's
+        /// card revealed for the first time (e.g. discarded/banished from hand), whose
+        /// image is only fetched at that moment.</summary>
+        public Visibility NameFallbackVisibility =>
+            !_faceDown && !IsToken && _image is null ? Visibility.Visible : Visibility.Collapsed;
 
         /// <summary>Defense position shows the card rotated 90°.</summary>
         public double Rotation => _defense ? 90 : 0;

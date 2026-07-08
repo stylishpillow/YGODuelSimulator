@@ -5,11 +5,63 @@
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:controls="clr-namespace:YGODuelSimulator.Views.Controls"
+      xmlns:conv="clr-namespace:YGODuelSimulator.Views.Converters"
       mc:Ignorable="d"
       Title="Duel Room"
       Loaded="Page_Loaded"
       PreviewKeyDown="Page_PreviewKeyDown">
     <Page.Resources>
+        <conv:PhaseActiveConverter x:Key="PhaseActive"/>
+
+        <!-- A phase button on the playmat's centre band. Content is the short phase
+             label (DP/SP/M1/BP/M2/EP); Tag is the DuelPhase name it selects. Its colour
+             (bright red vs muted red) is bound straight to the converter so the current
+             phase stays lit; a separate overlay handles hover without fighting that. -->
+        <Style x:Key="PhaseButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="Width" Value="58"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="bd" CornerRadius="6" BorderThickness="1.5">
+                                <Border.Background>
+                                    <MultiBinding Converter="{StaticResource PhaseActive}">
+                                        <Binding Path="DataContext.Phase" RelativeSource="{RelativeSource AncestorType=Page}"/>
+                                        <Binding Path="Tag" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                    </MultiBinding>
+                                </Border.Background>
+                                <Border.BorderBrush>
+                                    <MultiBinding Converter="{StaticResource PhaseActive}" ConverterParameter="border">
+                                        <Binding Path="DataContext.Phase" RelativeSource="{RelativeSource AncestorType=Page}"/>
+                                        <Binding Path="Tag" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                    </MultiBinding>
+                                </Border.BorderBrush>
+                            </Border>
+                            <Border x:Name="hover" CornerRadius="6" Background="#22FFFFFF" Opacity="0"/>
+                            <TextBlock x:Name="txt" Text="{TemplateBinding Content}"
+                                       FontWeight="SemiBold" FontSize="15"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock.Foreground>
+                                    <MultiBinding Converter="{StaticResource PhaseActive}" ConverterParameter="fg">
+                                        <Binding Path="DataContext.Phase" RelativeSource="{RelativeSource AncestorType=Page}"/>
+                                        <Binding Path="Tag" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                    </MultiBinding>
+                                </TextBlock.Foreground>
+                            </TextBlock>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="hover" Property="Opacity" Value="1"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- The reusable card back: an orange/tan bordered card with a centre
              diamond emblem. Used for face-down cards and the Deck / Extra piles. -->
         <ControlTemplate x:Key="CardBack" TargetType="Control">
@@ -47,6 +99,14 @@
                        Visibility="{Binding FrontVisibility, FallbackValue=Collapsed}"/>
                 <Control Template="{StaticResource CardBack}"
                          Visibility="{Binding BackVisibility, FallbackValue=Collapsed}"/>
+                <!-- Name fallback: a face-up card whose artwork hasn't loaded still shows
+                     its name, so a known card is never a blank rectangle. -->
+                <Border Visibility="{Binding NameFallbackVisibility, FallbackValue=Collapsed}"
+                        CornerRadius="5" Background="#26314A" BorderBrush="#5A7CA8" BorderThickness="1">
+                    <TextBlock Text="{Binding Name}" Foreground="#EAF2FF" FontWeight="SemiBold" FontSize="11"
+                               TextWrapping="Wrap" TextAlignment="Center" Margin="4"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
                 <!-- Tokens have no artwork; show a labelled placeholder when face-up. -->
                 <Border Visibility="{Binding TokenVisibility, FallbackValue=Collapsed}"
                         CornerRadius="5" Background="#3A5A3A" BorderBrush="#88BFE0BF" BorderThickness="1.5">
@@ -90,6 +150,13 @@
                        Visibility="{Binding FrontVisibility, FallbackValue=Collapsed}"/>
                 <Control Template="{StaticResource CardBack}"
                          Visibility="{Binding BackVisibility, FallbackValue=Collapsed}"/>
+                <!-- Name fallback for a face-up card whose artwork hasn't loaded. -->
+                <Border Visibility="{Binding NameFallbackVisibility, FallbackValue=Collapsed}"
+                        CornerRadius="5" Background="#26314A" BorderBrush="#5A7CA8" BorderThickness="1">
+                    <TextBlock Text="{Binding Name}" Foreground="#EAF2FF" FontWeight="SemiBold" FontSize="11"
+                               TextWrapping="Wrap" TextAlignment="Center" Margin="4"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
                 <!-- Tokens have no artwork; show a labelled placeholder when face-up. -->
                 <Border Visibility="{Binding TokenVisibility, FallbackValue=Collapsed}"
                         CornerRadius="5" Background="#3A5A3A" BorderBrush="#88BFE0BF" BorderThickness="1.5">
@@ -289,8 +356,6 @@
 
                     <TextBlock Text="{Binding TurnSummary}" VerticalAlignment="Center"
                                FontWeight="SemiBold" FontSize="14"/>
-                    <ui:Button Content="Next Phase" Margin="12,0,0,0" Click="NextPhase_Click"/>
-                    <ui:Button Content="End Turn" Margin="6,0,0,0" Appearance="Primary" Click="EndTurn_Click"/>
                 </WrapPanel>
 
                 <!-- Line 2: active-player actions + LP + dice -->
@@ -441,14 +506,57 @@
                                     <ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
                                 </Grid.ColumnDefinitions>
 
+                                <!-- Phase controls flank the shared Extra Monster Zones so the
+                                     Battle Phase button lands dead centre of the board. -->
+                                <StackPanel Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Button Content="DP" Tag="Draw" Style="{StaticResource PhaseButton}" Click="Phase_Click" ToolTip="Draw Phase"/>
+                                    <Button Content="SP" Tag="Standby" Style="{StaticResource PhaseButton}" Click="Phase_Click" ToolTip="Standby Phase"/>
+                                    <Button Content="M1" Tag="Main1" Style="{StaticResource PhaseButton}" Click="Phase_Click" ToolTip="Main Phase 1"/>
+                                </StackPanel>
+
                                 <Grid Grid.Column="2">
                                     <ContentControl Content="{Binding Player.ExtraMonsterZones[0]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                     <ContentControl Content="{Binding Opponent.ExtraMonsterZones[0]}" ContentTemplate="{StaticResource ExtraOverlayTemplate}"/>
                                 </Grid>
+
+                                <Button Grid.Column="3" Content="BP" Tag="Battle" Style="{StaticResource PhaseButton}"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Click="Phase_Click" ToolTip="Battle Phase"/>
+
                                 <Grid Grid.Column="4">
                                     <ContentControl Content="{Binding Player.ExtraMonsterZones[1]}" ContentTemplate="{StaticResource ZoneTemplate}"/>
                                     <ContentControl Content="{Binding Opponent.ExtraMonsterZones[1]}" ContentTemplate="{StaticResource ExtraOverlayTemplate}"/>
                                 </Grid>
+
+                                <StackPanel Grid.Column="5" Grid.ColumnSpan="3" Orientation="Horizontal"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Button Content="M2" Tag="Main2" Style="{StaticResource PhaseButton}" Click="Phase_Click" ToolTip="Main Phase 2"/>
+                                    <Button Content="EP" Tag="End" Style="{StaticResource PhaseButton}" Click="Phase_Click" ToolTip="End Phase"/>
+                                    <Button Content="End Turn" Width="78" Height="40" Margin="8,0,0,0" Cursor="Hand"
+                                            Foreground="White" FontWeight="SemiBold" Click="EndTurn_Click" ToolTip="Pass the turn">
+                                        <Button.Style>
+                                            <Style TargetType="Button">
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="Button">
+                                                            <Border x:Name="bd" CornerRadius="6" BorderThickness="1.5"
+                                                                    Background="#332F6FB0" BorderBrush="#804C9BE0">
+                                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="bd" Property="Background" Value="#4C4C9BE0"/>
+                                                                    <Setter TargetName="bd" Property="BorderBrush" Value="#CC7FC0FF"/>
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </StackPanel>
                             </Grid>
 
                             <!-- Player half: monster row (adjacent to the centre band), then

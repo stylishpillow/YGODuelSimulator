@@ -929,9 +929,12 @@ namespace YGODuelSimulator.Views.Pages
 
         // --- Turn / phase ---
 
-        private void NextPhase_Click(object sender, RoutedEventArgs e)
+        private void Phase_Click(object sender, RoutedEventArgs e)
         {
-            _state.NextPhase();
+            if (sender is not FrameworkElement { Tag: string tag }
+                || !Enum.TryParse<DuelPhase>(tag, out var phase)) return;
+            if (_state.Phase == phase) return;
+            _state.Phase = phase;
             _state.Log($"— {_state.TurnSummary} —");
             EmitTurnState();
         }
