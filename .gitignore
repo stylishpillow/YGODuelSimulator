@@ -373,6 +373,9 @@ cards.db-wal
 # Lazily-downloaded card image cache
 images/
 
+# Wrangler local state/cache — contains the Cloudflare account id/email; never commit
+.wrangler/
+
 # Velopack installer output (built by the release workflow / vpk pack)
 releases/
 

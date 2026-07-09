@@ -12,6 +12,13 @@
     <Authors>Eelco Hansma</Authors>
     <Version>0.1.0</Version>
 
+    <!-- Output the app as "YGO Duel Simulator.exe" so the built exe name matches the
+         Velopack packTitle. When they differ, a portable update creates a second,
+         differently-named launcher stub and orphans the old one. The root namespace
+         stays "YGODuelSimulator" (so StartupObject and pack URIs are unaffected). -->
+    <AssemblyName>YGO Duel Simulator</AssemblyName>
+    <RootNamespace>YGODuelSimulator</RootNamespace>
+
     <!-- App icon for the executable / taskbar. -->
     <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
 

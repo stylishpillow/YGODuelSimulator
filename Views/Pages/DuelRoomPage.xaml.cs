@@ -568,25 +568,38 @@ namespace YGODuelSimulator.Views.Pages
             {
                 var emit = _networked && IsMine(card);
                 var from = emit ? SourceKindOf(card) : ZoneKind.Hand; // capture before the move
+                var fromIndex = emit ? LocateOnField(card)?.index ?? 0 : 0; // source slot for field relocation
                 _state.MoveToSlot(card, slot);
                 card.FaceDown = p.faceDown;
                 card.Defense = p.defense;
                 LogAction(_state.FindBoard(card), $"{_pendingVerb} {NameOf(card)}");
-                if (emit) EmitPlacement(card, slot, p.faceDown, p.defense, from);
+                if (emit) EmitPlacement(card, slot, p.faceDown, p.defense, from, fromIndex);
                 EndPlacement();
                 Deselect();
                 e.Handled = true;
             }
         }
 
-        private void EmitPlacement(BoardCard card, ZoneSlot slot, bool faceDown, bool defense, ZoneKind from)
+        private void EmitPlacement(BoardCard card, ZoneSlot slot, bool faceDown, bool defense, ZoneKind from, int fromIndex)
         {
             if (card.IsToken)
                 _session?.Send(new TokenSummonMessage { Zone = slot.Kind, Index = slot.Index, Defense = defense });
             else if (faceDown)
-                _session?.Send(new SetCardMessage { Zone = slot.Kind, Index = slot.Index, Defense = defense, From = from });
+                _session?.Send(new SetCardMessage { Zone = slot.Kind, Index = slot.Index, Defense = defense, From = from, FromIndex = fromIndex });
             else
                 _session?.Send(new SummonMessage { CardId = card.Card.Id, Zone = slot.Kind, Index = slot.Index, Defense = defense, From = from });
+        }
+
+        /// <summary>Which of my non-field piles the card sits in, or null if it's on the
+        /// field / in hand / not mine. Used to sync pile-to-pile moves (search, recovery).</summary>
+        private ZoneKind? PileKindOf(BoardCard card)
+        {
+            var p = _state.Player;
+            if (p.Deck.Contains(card)) return ZoneKind.Deck;
+            if (p.ExtraDeck.Contains(card)) return ZoneKind.ExtraDeck;
+            if (p.Graveyard.Contains(card)) return ZoneKind.Graveyard;
+            if (p.Banished.Contains(card)) return ZoneKind.Banished;
+            return null;
         }
 
         /// <summary>Where a card of mine currently lives, for the network source hint.</summary>
@@ -778,11 +791,12 @@ namespace YGODuelSimulator.Views.Pages
         private void SelToHand_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Hand, ZoneKind.Hand);
         private void SelToGrave_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Graveyard, ZoneKind.Graveyard);
         private void SelToBanish_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Banished, ZoneKind.Banished);
+        private void SelToBanishFaceDown_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Banished, ZoneKind.Banished, faceDown: true);
         private void SelToDeckTop_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck, ZoneKind.Deck, toTop: true);
         private void SelToDeckBottom_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck, ZoneKind.Deck);
         private void SelToExtra_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.ExtraDeck, ZoneKind.ExtraDeck);
 
-        private void MoveSelected(Func<PlayerBoard, ObservableCollection<BoardCard>> pick, ZoneKind pile, bool toTop = false)
+        private void MoveSelected(Func<PlayerBoard, ObservableCollection<BoardCard>> pick, ZoneKind pile, bool toTop = false, bool faceDown = false)
         {
             if (_state.Selected is not { } card) return;
             Unreveal(card);
@@ -792,14 +806,18 @@ namespace YGODuelSimulator.Views.Pages
             // Capture where it came from before the move, for the network message.
             var fromField = mine ? LocateOnField(card) : null;
             var fromHand = mine && _state.Player.Hand.Contains(card);
-            // A public destination (GY/Banished) reveals the card's identity.
-            long? publicId = !card.IsToken && (pile is ZoneKind.Graveyard or ZoneKind.Banished) ? card.Card.Id : null;
+            var fromPile = mine && fromField is null && !fromHand ? PileKindOf(card) : null;
+            // A public destination (GY/Banished) reveals the card's identity — unless it's
+            // being banished face-down, which stays hidden from the opponent.
+            long? publicId = !faceDown && !card.IsToken && (pile is ZoneKind.Graveyard or ZoneKind.Banished) ? card.Card.Id : null;
             var isToken = card.IsToken;
 
             ResetPosition(card);
+            if (faceDown) card.FaceDown = true; // a face-down banished card sits as a back
             var movedName = NameOf(card);
             _state.MoveToPile(card, pick(board), toTop);
-            LogAction(board, $"moved {movedName} to {PileLabel(pile, toTop)}");
+            var verb = faceDown ? $"banished {movedName} face-down" : $"moved {movedName} to {PileLabel(pile, toTop)}";
+            LogAction(board, verb);
 
             if (_networked && mine)
             {
@@ -807,6 +825,15 @@ namespace YGODuelSimulator.Views.Pages
                     _session?.Send(new FieldToPileMessage { Zone = f.kind, Index = f.index, Pile = pile, CardId = publicId, ToTop = toTop, IsToken = isToken });
                 else if (fromHand)
                     _session?.Send(new HandToPileMessage { Pile = pile, CardId = publicId, ToTop = toTop });
+                else if (fromPile is { } sp)
+                {
+                    // Pile → pile (search / recovery). Reveal the id only when a public pile
+                    // (GY/Banished) is involved — a search into the hand, or a face-down
+                    // banish, stays hidden.
+                    var sourcePublic = sp is ZoneKind.Graveyard or ZoneKind.Banished;
+                    long? moveId = !faceDown && !card.IsToken && (sourcePublic || publicId is not null) ? card.Card.Id : null;
+                    _session?.Send(new PileMoveMessage { From = sp, To = pile, CardId = moveId, ToTop = toTop });
+                }
             }
 
             EndPlacement();
@@ -848,17 +875,22 @@ namespace YGODuelSimulator.Views.Pages
         // Which deck the DeckActions menu was opened over (true = opponent's deck).
         private bool _deckMenuIsOpponent;
 
-        // Right-click a deck pile → the deck menu (Shuffle + surrender), opened at the
-        // cursor and styled like the card menus. Online you can only act on your own deck,
-        // so the opponent's deck offers nothing and the menu doesn't open there.
-        private void Deck_RightClick(object sender, MouseButtonEventArgs e)
+        // Click a deck pile (either button) → the deck menu (View / Shuffle + surrender),
+        // opened at the cursor and styled like the card menus. Left-click routes here too
+        // rather than opening the viewer directly, so looking through the Deck is always a
+        // deliberate, announced action. Online you can only act on your own deck, so the
+        // opponent's deck offers nothing and the menu doesn't open there.
+        private void Deck_LeftClick(object sender, MouseButtonEventArgs e) => OpenDeckMenu(sender, e);
+        private void Deck_RightClick(object sender, MouseButtonEventArgs e) => OpenDeckMenu(sender, e);
+
+        private void OpenDeckMenu(object sender, MouseButtonEventArgs e)
         {
             if ((sender as FrameworkElement)?.Tag is not string tag) return;
             e.Handled = true;
 
             _deckMenuIsOpponent = tag.StartsWith("o:");
             var isOwn = !_deckMenuIsOpponent;
-            // Offline you may shuffle either deck; online only your own.
+            // Offline you may act on either deck; online only your own.
             var canShuffle = isOwn || !_networked;
 
             DeckPlayGroup.Visibility = canShuffle ? Visibility.Visible : Visibility.Collapsed;
@@ -866,6 +898,26 @@ namespace YGODuelSimulator.Views.Pages
 
             if (!canShuffle && !isOwn) return; // the opponent's deck online: nothing to offer
             DeckActions.IsOpen = true;
+        }
+
+        // Look through the Deck. Doing this to your own Deck is a public action in
+        // Yu-Gi-Oh! (only allowed for specific card effects), so it's announced to the
+        // opponent — both players must be aware the Deck was searched.
+        private void ViewDeck_Click(object sender, RoutedEventArgs e)
+        {
+            DeckActions.IsOpen = false;
+            var board = _deckMenuIsOpponent ? _state.Opponent : _state.Player;
+            var who = _deckMenuIsOpponent ? "Opponent" : "Player";
+            PileViewerTitle.Text = $"{who} · Deck";
+            PileViewerItems.ItemsSource = board.Deck;
+            PileViewer.IsOpen = true;
+
+            if (_deckMenuIsOpponent) return; // viewing your own deck is the announced case
+            _state.Announce(_state.Player.DisplayName, "is looking through", "their Deck");
+            PointAt(null); // arm the auto-clear so the banner fades on its own
+            LogAction(_state.Player, "is looking through their Deck");
+            if (_networked)
+                _session?.Send(new AnnounceMessage { Verb = "is looking through", Target = "their Deck", Side = AnnounceSide.None });
         }
 
         private void DeckShuffle_Click(object sender, RoutedEventArgs e)
@@ -1043,16 +1095,16 @@ namespace YGODuelSimulator.Views.Pages
 
         private void Die_Click(object sender, RoutedEventArgs e)
         {
-            int n = _state.RollDie();
-            ResultText.Text = $"Rolled a {n}.";
-            AnnounceRandom($"rolled a {n}");
+            var roll = _state.RollDie();
+            DiceResultText.Text = $"Rolled a {roll}";
+            AnnounceRandom($"rolled a {roll}");
         }
 
         private void Coin_Click(object sender, RoutedEventArgs e)
         {
-            var face = _state.FlipCoin() ? "Heads" : "Tails";
-            ResultText.Text = $"Coin: {face}.";
-            AnnounceRandom($"flipped {face}");
+            var heads = _state.FlipCoin();
+            DiceResultText.Text = heads ? "Coin: Heads" : "Coin: Tails";
+            AnnounceRandom($"flipped {(heads ? "Heads" : "Tails")}");
         }
 
         // Records a dice/coin result in my log and, online, sends it so the opponent
@@ -1393,7 +1445,13 @@ namespace YGODuelSimulator.Views.Pages
                     break;
 
                 case SetCardMessage set:
-                    RemoveFromOppSource(set.From, null);
+                    // A face-down card has no id, so a field relocation is cleared by
+                    // coordinates; other sources fall back to the id/last-card removal.
+                    if (set.From is ZoneKind.MainMonster or ZoneKind.ExtraMonster or ZoneKind.SpellTrap or ZoneKind.Field)
+                    {
+                        if (o.Slot(set.From, set.FromIndex) is { } srcSlot) srcSlot.Card = null;
+                    }
+                    else RemoveFromOppSource(set.From, null);
                     PlaceInZone(o, set.Zone, set.Index, new BoardCard(new Card { Name = "Card" }) { FaceDown = true, Defense = set.Defense });
                     LogAction(o, set.Zone == ZoneKind.SpellTrap ? "Set a Spell/Trap" : "Set a monster");
                     break;
@@ -1428,6 +1486,16 @@ namespace YGODuelSimulator.Views.Pages
                     var hdest = h.CardId is { } hid ? await BuildCardAsync(hid) : BoardCard.Hidden();
                     AddToPile(o, h.Pile, hdest, h.ToTop);
                     LogAction(o, $"moved {(h.CardId is not null ? NameOf(hdest) : "a card")} from their hand to {PileLabel(h.Pile, h.ToTop)}");
+                    break;
+
+                case PileMoveMessage pm:
+                    RemoveFromOppSource(pm.From, pm.CardId);
+                    // Reveal at a public destination; a move into a private zone (hand/deck)
+                    // stays a hidden back even if the id came across for source removal.
+                    var pmPublicDest = pm.To is ZoneKind.Graveyard or ZoneKind.Banished;
+                    var pmDest = pmPublicDest && pm.CardId is { } pmid ? await BuildCardAsync(pmid) : BoardCard.Hidden();
+                    AddToPile(o, pm.To, pmDest, pm.ToTop);
+                    LogAction(o, $"moved {(pmPublicDest && pm.CardId is not null ? NameOf(pmDest) : "a card")} to {PileLabel(pm.To, pm.ToTop)}");
                     break;
 
                 case DrawMessage d:

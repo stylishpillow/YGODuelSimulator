@@ -28,6 +28,9 @@ namespace YGODuelSimulator.Views
             // Show who's signed in on the footer item that opens their profile.
             UserNavItem.Content = Session.CurrentUser?.Username ?? "Account";
 
+            // Current version in the bottom-right corner.
+            VersionText.Text = $"v{UpdateService.CurrentVersion}";
+
             Loaded += (_, _) => RootNavigation.Navigate(typeof(HomePage));
         }
 

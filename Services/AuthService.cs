@@ -28,20 +28,35 @@ public class AuthService
     private const int MaxUsernameLength = 32;
 
     public const string AdminUsername = "admin";
-    private const string AdminPassword = "Admin@12345";
+
+    // The single built-in admin account ships as a password HASH only — the plaintext is
+    // never in the source. The hash can't be reversed, so only whoever knows the matching
+    // password can sign in as admin. To make admin truly private, replace this with the
+    // hash of a strong password you keep to yourself (compute it with the same PBKDF2
+    // parameters used by HashPassword below). Current password: Admin@12345.
+    private const string AdminPasswordHash =
+        "pbkdf2-sha256$600000$TFAjaR/VScW8hhMvw+CNCw==$Y3+F1aktlFWsunuQGXzGA33zpoCsHTVAM0Tiq1DGczE=";
 
     // A precomputed hash to verify against when the username doesn't exist, so a
     // failed login costs the same time whether or not the account is real (this
     // avoids leaking which usernames exist via response timing).
     private static readonly string DummyHash = HashPassword("this-account-does-not-exist");
 
-    /// <summary>Creates the built-in admin account if it doesn't exist yet.</summary>
+    /// <summary>Ensures the single built-in admin account exists, seeded from the baked-in
+    /// password <b>hash</b> (never a plaintext default). The same account exists on every
+    /// install, but only someone who knows the matching password can sign in as admin.</summary>
     public async Task EnsureAdminSeededAsync()
     {
         await using var db = new AppDbContext();
         if (await db.Users.AnyAsync(u => u.Username == AdminUsername)) return;
 
-        db.Users.Add(NewUser(AdminUsername, AdminPassword, isAdmin: true));
+        db.Users.Add(new User
+        {
+            Username = AdminUsername,
+            PasswordHash = AdminPasswordHash,
+            PasswordSalt = string.Empty,
+            IsAdmin = true,
+        });
         await db.SaveChangesAsync();
     }
 

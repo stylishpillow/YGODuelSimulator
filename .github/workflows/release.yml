@@ -41,7 +41,7 @@ jobs:
         run: vpk download github --outputDir releases --repoUrl ${{ github.server_url }}/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package installer
-        run: vpk pack --packId YGODuelSimulator --packTitle "YGO Duel Simulator" --packVersion ${{ steps.version.outputs.version }} --packDir bin/Release/publish/win-x64 --mainExe YGODuelSimulator.exe --outputDir releases
+        run: vpk pack --packId YGODuelSimulator --packTitle "YGO Duel Simulator" --packVersion ${{ steps.version.outputs.version }} --packDir bin/Release/publish/win-x64 --mainExe "YGO Duel Simulator.exe" --outputDir releases
 
       - name: Publish GitHub Release
         run: vpk upload github --outputDir releases --repoUrl ${{ github.server_url }}/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --publish --releaseName "YGO Duel Simulator ${{ steps.version.outputs.version }}" --tag ${{ github.ref_name }}
