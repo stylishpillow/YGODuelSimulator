@@ -40,15 +40,23 @@ namespace YGODuelSimulator.Views.Pages
             }
 
             UpdateStatusText.Text = "Checking…";
-            if (await UpdateService.CheckAsync() is { } pending)
+            try
             {
-                // Same mandatory window as the login gate; here a quit just cancels.
-                new UpdateWindow(pending.mgr, pending.info) { Owner = Window.GetWindow(this) }.ShowDialog();
-                UpdateStatusText.Text = "Update available.";
+                if (await UpdateService.CheckAsync() is { } pending)
+                {
+                    // Same mandatory window as the login gate; here a quit just cancels.
+                    new UpdateWindow(pending.mgr, pending.info) { Owner = Window.GetWindow(this) }.ShowDialog();
+                    UpdateStatusText.Text = "Update available.";
+                }
+                else
+                {
+                    UpdateStatusText.Text = "You're on the latest version.";
+                }
             }
-            else
+            catch (Exception ex)
             {
-                UpdateStatusText.Text = "You're on the latest version.";
+                // Surface the real reason instead of a misleading "up to date".
+                UpdateStatusText.Text = $"Couldn't check for updates: {ex.Message}";
             }
             CheckUpdatesButton.IsEnabled = true;
         }

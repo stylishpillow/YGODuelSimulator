@@ -1,3 +1,4 @@
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
@@ -28,21 +29,55 @@ public class AuthService
     private const int MaxUsernameLength = 32;
 
     public const string AdminUsername = "admin";
-    private const string AdminPassword = "Admin@12345";
+    private const string AdminCredentialsFile = "admin-credentials.txt";
 
     // A precomputed hash to verify against when the username doesn't exist, so a
     // failed login costs the same time whether or not the account is real (this
     // avoids leaking which usernames exist via response timing).
     private static readonly string DummyHash = HashPassword("this-account-does-not-exist");
 
-    /// <summary>Creates the built-in admin account if it doesn't exist yet.</summary>
+    /// <summary>Creates the built-in admin account on first run with a <b>randomly
+    /// generated</b> password (never a shipped default), and writes the credentials once
+    /// to a local file so the machine owner can retrieve them. This keeps the public
+    /// source/build from disclosing a working admin login for every install.</summary>
     public async Task EnsureAdminSeededAsync()
     {
         await using var db = new AppDbContext();
         if (await db.Users.AnyAsync(u => u.Username == AdminUsername)) return;
 
-        db.Users.Add(NewUser(AdminUsername, AdminPassword, isAdmin: true));
+        var password = GeneratePassword();
+        db.Users.Add(NewUser(AdminUsername, password, isAdmin: true));
         await db.SaveChangesAsync();
+        WriteAdminCredentials(AdminUsername, password);
+    }
+
+    /// <summary>A strong random password from an unambiguous alphabet (no 0/O/1/l/I).</summary>
+    private static string GeneratePassword(int length = 20)
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        var chars = new char[length];
+        for (var i = 0; i < length; i++)
+            chars[i] = alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
+        return new string(chars);
+    }
+
+    /// <summary>Writes the one-time admin credentials next to the app's local data.
+    /// Best-effort: if it can't be written, the account still exists — the password just
+    /// can't be recovered from disk.</summary>
+    private static void WriteAdminCredentials(string username, string password)
+    {
+        try
+        {
+            var path = Path.Combine(AppPaths.BaseDirectory, AdminCredentialsFile);
+            File.WriteAllText(path,
+                "YGO Duel Simulator — administrator account\r\n" +
+                "This password was generated randomly the first time the app ran on this\r\n" +
+                "machine. Keep this file private; delete it after signing in and changing the\r\n" +
+                "password from the Profile screen.\r\n\r\n" +
+                $"Username: {username}\r\n" +
+                $"Password: {password}\r\n");
+        }
+        catch { /* non-fatal */ }
     }
 
     /// <summary>Returns the user if the credentials match, otherwise null. On success

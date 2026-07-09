@@ -14,11 +14,13 @@ namespace YGODuelSimulator.Services
     /// </summary>
     public static class UpdateService
     {
-        // Public repo, so no access token is needed. If the repo ever goes private this
-        // must carry a token (and the feed would have to be reachable by the client).
+        // Reads the GitHub Releases update feed. This repo must be PUBLIC so installed
+        // clients can reach the feed unauthenticated (a private repo returns 404 and the
+        // check finds nothing). Public → no access token needed.
         private const string RepoUrl = "https://github.com/stylishpillow/YGODuelSimulator";
+        private const string? AccessToken = null;
 
-        private static UpdateManager NewManager() => new(new GithubSource(RepoUrl, null, prerelease: false));
+        private static UpdateManager NewManager() => new(new GithubSource(RepoUrl, AccessToken, prerelease: false));
 
         /// <summary>True only for a Velopack-installed build (not a dev <c>dotnet run</c>).</summary>
         public static bool IsInstalled
@@ -45,21 +47,16 @@ namespace YGODuelSimulator.Services
         }
 
         /// <summary>Checks the release feed for a newer version. Returns the manager and the
-        /// pending update when one exists, or null when up to date, not installed, or the
-        /// feed can't be reached (offline users are never blocked from playing).</summary>
+        /// pending update when one exists, or null when up to date or not installed.
+        /// <para>Throws on a real failure (offline, feed unreachable, private repo with no
+        /// token) so callers can tell "up to date" apart from "couldn't check" — the login
+        /// gate swallows it (never block play), while the manual check surfaces it.</para></summary>
         public static async Task<(UpdateManager mgr, UpdateInfo info)?> CheckAsync()
         {
-            try
-            {
-                var mgr = NewManager();
-                if (!mgr.IsInstalled) return null;
-                var info = await mgr.CheckForUpdatesAsync();
-                return info is null ? null : (mgr, info);
-            }
-            catch
-            {
-                return null; // offline / feed unreachable — let the app run
-            }
+            var mgr = NewManager();
+            if (!mgr.IsInstalled) return null;
+            var info = await mgr.CheckForUpdatesAsync();
+            return info is null ? null : (mgr, info);
         }
     }
 }
