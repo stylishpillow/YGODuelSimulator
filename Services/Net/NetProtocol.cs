@@ -8,7 +8,7 @@ namespace YGODuelSimulator.Services.Net;
 public static class NetProtocol
 {
     /// <summary>Bumped whenever the message shapes change; peers must match.</summary>
-    public const int ProtocolVersion = 5;
+    public const int ProtocolVersion = 6;
 
     public const int DiscoveryPort = 47772;   // UDP room beacons
     public const int DefaultGamePort = 47771;  // TCP duel connection
@@ -53,6 +53,7 @@ public enum AnnounceSide { None, SenderField, ReceiverField }
 [JsonDerivedType(typeof(PositionChangeMessage), "position")]
 [JsonDerivedType(typeof(FieldToPileMessage), "fieldToPile")]
 [JsonDerivedType(typeof(HandToPileMessage), "handToPile")]
+[JsonDerivedType(typeof(PileMoveMessage), "pileMove")]
 [JsonDerivedType(typeof(DeckToPileMessage), "deckToPile")]
 [JsonDerivedType(typeof(DrawMessage), "draw")]
 [JsonDerivedType(typeof(LifePointsMessage), "lp")]
@@ -120,6 +121,10 @@ public sealed class SetCardMessage : NetMessage
     public int Index { get; set; }
     public bool Defense { get; set; }
     public ZoneKind From { get; set; } = ZoneKind.Hand;
+    /// <summary>Source slot index when <see cref="From"/> is a field zone (relocating a
+    /// face-down card). A face-down card carries no id, so the receiver clears the origin
+    /// by coordinates rather than by looking it up by passcode.</summary>
+    public int FromIndex { get; set; }
 }
 
 /// <summary>A previously hidden card turns face-up, revealing its id.</summary>
@@ -154,6 +159,20 @@ public sealed class FieldToPileMessage : NetMessage
 public sealed class HandToPileMessage : NetMessage
 {
     public ZoneKind Pile { get; set; }
+    public long? CardId { get; set; }
+    public bool ToTop { get; set; }
+}
+
+/// <summary>The sender moved one of their cards between two non-field piles — e.g. a
+/// Deck search into the hand, or recovering a card from the Graveyard. <see cref="From"/>
+/// and <see cref="To"/> are pile kinds (Hand / Deck / ExtraDeck / Graveyard / Banished).
+/// <see cref="CardId"/> is set only when a public pile (GY/Banished) is involved, so the
+/// receiver can remove the right card and/or reveal it at a public destination; a move
+/// into a private zone (like a search into the hand) stays a hidden placeholder.</summary>
+public sealed class PileMoveMessage : NetMessage
+{
+    public ZoneKind From { get; set; }
+    public ZoneKind To { get; set; }
     public long? CardId { get; set; }
     public bool ToTop { get; set; }
 }

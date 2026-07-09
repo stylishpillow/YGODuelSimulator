@@ -568,25 +568,38 @@ namespace YGODuelSimulator.Views.Pages
             {
                 var emit = _networked && IsMine(card);
                 var from = emit ? SourceKindOf(card) : ZoneKind.Hand; // capture before the move
+                var fromIndex = emit ? LocateOnField(card)?.index ?? 0 : 0; // source slot for field relocation
                 _state.MoveToSlot(card, slot);
                 card.FaceDown = p.faceDown;
                 card.Defense = p.defense;
                 LogAction(_state.FindBoard(card), $"{_pendingVerb} {NameOf(card)}");
-                if (emit) EmitPlacement(card, slot, p.faceDown, p.defense, from);
+                if (emit) EmitPlacement(card, slot, p.faceDown, p.defense, from, fromIndex);
                 EndPlacement();
                 Deselect();
                 e.Handled = true;
             }
         }
 
-        private void EmitPlacement(BoardCard card, ZoneSlot slot, bool faceDown, bool defense, ZoneKind from)
+        private void EmitPlacement(BoardCard card, ZoneSlot slot, bool faceDown, bool defense, ZoneKind from, int fromIndex)
         {
             if (card.IsToken)
                 _session?.Send(new TokenSummonMessage { Zone = slot.Kind, Index = slot.Index, Defense = defense });
             else if (faceDown)
-                _session?.Send(new SetCardMessage { Zone = slot.Kind, Index = slot.Index, Defense = defense, From = from });
+                _session?.Send(new SetCardMessage { Zone = slot.Kind, Index = slot.Index, Defense = defense, From = from, FromIndex = fromIndex });
             else
                 _session?.Send(new SummonMessage { CardId = card.Card.Id, Zone = slot.Kind, Index = slot.Index, Defense = defense, From = from });
+        }
+
+        /// <summary>Which of my non-field piles the card sits in, or null if it's on the
+        /// field / in hand / not mine. Used to sync pile-to-pile moves (search, recovery).</summary>
+        private ZoneKind? PileKindOf(BoardCard card)
+        {
+            var p = _state.Player;
+            if (p.Deck.Contains(card)) return ZoneKind.Deck;
+            if (p.ExtraDeck.Contains(card)) return ZoneKind.ExtraDeck;
+            if (p.Graveyard.Contains(card)) return ZoneKind.Graveyard;
+            if (p.Banished.Contains(card)) return ZoneKind.Banished;
+            return null;
         }
 
         /// <summary>Where a card of mine currently lives, for the network source hint.</summary>
@@ -792,6 +805,7 @@ namespace YGODuelSimulator.Views.Pages
             // Capture where it came from before the move, for the network message.
             var fromField = mine ? LocateOnField(card) : null;
             var fromHand = mine && _state.Player.Hand.Contains(card);
+            var fromPile = mine && fromField is null && !fromHand ? PileKindOf(card) : null;
             // A public destination (GY/Banished) reveals the card's identity.
             long? publicId = !card.IsToken && (pile is ZoneKind.Graveyard or ZoneKind.Banished) ? card.Card.Id : null;
             var isToken = card.IsToken;
@@ -807,6 +821,14 @@ namespace YGODuelSimulator.Views.Pages
                     _session?.Send(new FieldToPileMessage { Zone = f.kind, Index = f.index, Pile = pile, CardId = publicId, ToTop = toTop, IsToken = isToken });
                 else if (fromHand)
                     _session?.Send(new HandToPileMessage { Pile = pile, CardId = publicId, ToTop = toTop });
+                else if (fromPile is { } sp)
+                {
+                    // Pile → pile (search / recovery). Reveal the id only when a public pile
+                    // (GY/Banished) is involved — a search into the hand stays hidden.
+                    var sourcePublic = sp is ZoneKind.Graveyard or ZoneKind.Banished;
+                    long? moveId = !card.IsToken && (sourcePublic || publicId is not null) ? card.Card.Id : null;
+                    _session?.Send(new PileMoveMessage { From = sp, To = pile, CardId = moveId, ToTop = toTop });
+                }
             }
 
             EndPlacement();
@@ -1374,7 +1396,13 @@ namespace YGODuelSimulator.Views.Pages
                     break;
 
                 case SetCardMessage set:
-                    RemoveFromOppSource(set.From, null);
+                    // A face-down card has no id, so a field relocation is cleared by
+                    // coordinates; other sources fall back to the id/last-card removal.
+                    if (set.From is ZoneKind.MainMonster or ZoneKind.ExtraMonster or ZoneKind.SpellTrap or ZoneKind.Field)
+                    {
+                        if (o.Slot(set.From, set.FromIndex) is { } srcSlot) srcSlot.Card = null;
+                    }
+                    else RemoveFromOppSource(set.From, null);
                     PlaceInZone(o, set.Zone, set.Index, new BoardCard(new Card { Name = "Card" }) { FaceDown = true, Defense = set.Defense });
                     LogAction(o, set.Zone == ZoneKind.SpellTrap ? "Set a Spell/Trap" : "Set a monster");
                     break;
@@ -1409,6 +1437,16 @@ namespace YGODuelSimulator.Views.Pages
                     var hdest = h.CardId is { } hid ? await BuildCardAsync(hid) : BoardCard.Hidden();
                     AddToPile(o, h.Pile, hdest, h.ToTop);
                     LogAction(o, $"moved {(h.CardId is not null ? NameOf(hdest) : "a card")} from their hand to {PileLabel(h.Pile, h.ToTop)}");
+                    break;
+
+                case PileMoveMessage pm:
+                    RemoveFromOppSource(pm.From, pm.CardId);
+                    // Reveal at a public destination; a move into a private zone (hand/deck)
+                    // stays a hidden back even if the id came across for source removal.
+                    var pmPublicDest = pm.To is ZoneKind.Graveyard or ZoneKind.Banished;
+                    var pmDest = pmPublicDest && pm.CardId is { } pmid ? await BuildCardAsync(pmid) : BoardCard.Hidden();
+                    AddToPile(o, pm.To, pmDest, pm.ToTop);
+                    LogAction(o, $"moved {(pmPublicDest && pm.CardId is not null ? NameOf(pmDest) : "a card")} to {PileLabel(pm.To, pm.ToTop)}");
                     break;
 
                 case DrawMessage d:
