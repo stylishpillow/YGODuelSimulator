@@ -293,12 +293,12 @@ public sealed class ControlSwapMessage : NetMessage
     public bool Defense { get; set; }
 }
 
-/// <summary>The sender is surrendering the duel — a table-talk gesture that ends the
-/// game in the receiver's favour. <see cref="Verb"/> is the past-tense phrase for the
-/// log ("conceded", "admitted defeat").</summary>
+/// <summary>The sender is conceding the duel — either by surrendering or by running out
+/// of life points — a table-talk gesture that ends the game in the receiver's favour.
+/// <see cref="Verb"/> is the past-tense phrase for the log ("surrendered", "was defeated").</summary>
 public sealed class ConcedeMessage : NetMessage
 {
-    public string Verb { get; set; } = "conceded";
+    public string Verb { get; set; } = "surrendered";
 }
 
 /// <summary>Sent from the end screen to ask for a rematch. When both peers have sent

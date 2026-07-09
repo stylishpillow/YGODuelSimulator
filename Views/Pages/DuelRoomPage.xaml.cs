@@ -67,6 +67,8 @@ namespace YGODuelSimulator.Views.Pages
         private Deck? _opponentDeckSource;
         private bool _duelOver;
         private bool _loadingDecks;                  // true while pre-caching card images before a duel
+        private bool _playerLpZeroPrompted;          // guards the "LP hit 0" prompt against re-firing per crossing
+        private bool _oppLpZeroPrompted;
         private bool _iLost;                         // did *I* lose the last duel (loser goes first on rematch)
         private bool _localWantsRematch;
         private bool _remoteWantsRematch;
@@ -92,11 +94,13 @@ namespace YGODuelSimulator.Views.Pages
                 if (e.PropertyName != nameof(PlayerBoard.LifePoints)) return;
                 if (_networked) _session?.Send(new LifePointsMessage { LifePoints = _state.Player.LifePoints });
                 LogLifePoints(_state.Player, ref _playerLpShadow);
+                CheckLifePointsZero(_state.Player);
             };
             _state.Opponent.PropertyChanged += (_, e) =>
             {
-                if (e.PropertyName == nameof(PlayerBoard.LifePoints))
-                    LogLifePoints(_state.Opponent, ref _oppLpShadow);
+                if (e.PropertyName != nameof(PlayerBoard.LifePoints)) return;
+                LogLifePoints(_state.Opponent, ref _oppLpShadow);
+                CheckLifePointsZero(_state.Opponent);
             };
 
             // Keep the log scrolled to the newest entry.
@@ -956,8 +960,7 @@ namespace YGODuelSimulator.Views.Pages
                 _session?.Send(new DeckToPileMessage { CardId = card.Card.Id, Pile = ZoneKind.Graveyard, FromBottom = fromBottom });
         }
 
-        private void Concede_Click(object sender, RoutedEventArgs e) => Surrender("conceded");
-        private void AdmitDefeat_Click(object sender, RoutedEventArgs e) => Surrender("admitted defeat");
+        private void Surrender_Click(object sender, RoutedEventArgs e) => Surrender("surrendered");
 
         // Surrender the duel — a table-talk gesture (no rules engine): log it, tell the
         // opponent online so they see they've won, then raise the end screen.
@@ -977,6 +980,57 @@ namespace YGODuelSimulator.Views.Pages
             {
                 // Hot-seat: the Player board surrenders, so the Opponent wins.
                 EndDuel($"{_state.Opponent.DisplayName} wins", $"{me.DisplayName} {verb}.");
+            }
+        }
+
+        // When a board's life points cross to 0 (or below), offer to end the duel. It's a
+        // prompt, not an auto-end: this is a manual sim, so the LP may be about to be
+        // corrected, or an effect that prevents the loss applies. We ask once per crossing
+        // — the guard resets when LP climbs back above 0.
+        private async void CheckLifePointsZero(PlayerBoard board)
+        {
+            bool isPlayer = board.Side == PlayerSide.Player;
+
+            // Recovered above 0: re-arm the prompt for a future crossing.
+            if (board.LifePoints > 0)
+            {
+                if (isPlayer) _playerLpZeroPrompted = false; else _oppLpZeroPrompted = false;
+                return;
+            }
+
+            if (_duelOver) return;
+            if (isPlayer ? _playerLpZeroPrompted : _oppLpZeroPrompted) return;
+            // Online I can only end my *own* loss; the opponent concedes on their client
+            // when their own LP hits 0.
+            if (_networked && !isPlayer) return;
+
+            if (isPlayer) _playerLpZeroPrompted = true; else _oppLpZeroPrompted = true;
+
+            var winner = isPlayer ? _state.Opponent : _state.Player;
+            var box = new Wpf.Ui.Controls.MessageBox
+            {
+                Title = "Life points depleted",
+                Content = $"{board.DisplayName}'s life points reached 0. End the duel?",
+                PrimaryButtonText = "End duel",
+                CloseButtonText = "Not yet",
+            };
+            var result = await box.ShowDialogAsync();
+            if (result != Wpf.Ui.Controls.MessageBoxResult.Primary) return;
+
+            // The LP may have been corrected (or the duel already ended) while the prompt was open.
+            if (_duelOver || board.LifePoints > 0) return;
+
+            _iLost = isPlayer;
+            LogAction(board, "was defeated (0 LP)");
+            if (_networked)
+            {
+                // Only reachable when I'm the loser; the opponent sees their win via this.
+                _session?.Send(new ConcedeMessage { Verb = "was defeated" });
+                EndDuel("You lost", $"Your life points reached 0. {winner.DisplayName} wins.");
+            }
+            else
+            {
+                EndDuel($"{winner.DisplayName} wins", $"{board.DisplayName}'s life points reached 0.");
             }
         }
 
@@ -1399,6 +1453,8 @@ namespace YGODuelSimulator.Views.Pages
             _duelOver = false;
             _localWantsRematch = false;
             _remoteWantsRematch = false;
+            _playerLpZeroPrompted = false;
+            _oppLpZeroPrompted = false;
         }
 
         private void Rematch_Click(object sender, RoutedEventArgs e)

@@ -913,8 +913,7 @@
 
                     <StackPanel x:Name="DeckSurrenderGroup">
                         <TextBlock Text="SURRENDER" Foreground="#8AA" Margin="4,6,4,2" FontSize="10" FontWeight="Bold"/>
-                        <ui:Button Content="Concede" HorizontalAlignment="Stretch" Margin="0,2" Click="Concede_Click"/>
-                        <ui:Button Content="Admit defeat" HorizontalAlignment="Stretch" Margin="0,2" Click="AdmitDefeat_Click"/>
+                        <ui:Button Content="Surrender" HorizontalAlignment="Stretch" Margin="0,2" Click="Surrender_Click"/>
                     </StackPanel>
                 </StackPanel>
             </Border>
