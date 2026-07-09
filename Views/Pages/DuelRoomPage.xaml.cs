@@ -791,11 +791,12 @@ namespace YGODuelSimulator.Views.Pages
         private void SelToHand_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Hand, ZoneKind.Hand);
         private void SelToGrave_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Graveyard, ZoneKind.Graveyard);
         private void SelToBanish_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Banished, ZoneKind.Banished);
+        private void SelToBanishFaceDown_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Banished, ZoneKind.Banished, faceDown: true);
         private void SelToDeckTop_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck, ZoneKind.Deck, toTop: true);
         private void SelToDeckBottom_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.Deck, ZoneKind.Deck);
         private void SelToExtra_Click(object sender, RoutedEventArgs e) => MoveSelected(b => b.ExtraDeck, ZoneKind.ExtraDeck);
 
-        private void MoveSelected(Func<PlayerBoard, ObservableCollection<BoardCard>> pick, ZoneKind pile, bool toTop = false)
+        private void MoveSelected(Func<PlayerBoard, ObservableCollection<BoardCard>> pick, ZoneKind pile, bool toTop = false, bool faceDown = false)
         {
             if (_state.Selected is not { } card) return;
             Unreveal(card);
@@ -806,14 +807,17 @@ namespace YGODuelSimulator.Views.Pages
             var fromField = mine ? LocateOnField(card) : null;
             var fromHand = mine && _state.Player.Hand.Contains(card);
             var fromPile = mine && fromField is null && !fromHand ? PileKindOf(card) : null;
-            // A public destination (GY/Banished) reveals the card's identity.
-            long? publicId = !card.IsToken && (pile is ZoneKind.Graveyard or ZoneKind.Banished) ? card.Card.Id : null;
+            // A public destination (GY/Banished) reveals the card's identity — unless it's
+            // being banished face-down, which stays hidden from the opponent.
+            long? publicId = !faceDown && !card.IsToken && (pile is ZoneKind.Graveyard or ZoneKind.Banished) ? card.Card.Id : null;
             var isToken = card.IsToken;
 
             ResetPosition(card);
+            if (faceDown) card.FaceDown = true; // a face-down banished card sits as a back
             var movedName = NameOf(card);
             _state.MoveToPile(card, pick(board), toTop);
-            LogAction(board, $"moved {movedName} to {PileLabel(pile, toTop)}");
+            var verb = faceDown ? $"banished {movedName} face-down" : $"moved {movedName} to {PileLabel(pile, toTop)}";
+            LogAction(board, verb);
 
             if (_networked && mine)
             {
@@ -824,9 +828,10 @@ namespace YGODuelSimulator.Views.Pages
                 else if (fromPile is { } sp)
                 {
                     // Pile → pile (search / recovery). Reveal the id only when a public pile
-                    // (GY/Banished) is involved — a search into the hand stays hidden.
+                    // (GY/Banished) is involved — a search into the hand, or a face-down
+                    // banish, stays hidden.
                     var sourcePublic = sp is ZoneKind.Graveyard or ZoneKind.Banished;
-                    long? moveId = !card.IsToken && (sourcePublic || publicId is not null) ? card.Card.Id : null;
+                    long? moveId = !faceDown && !card.IsToken && (sourcePublic || publicId is not null) ? card.Card.Id : null;
                     _session?.Send(new PileMoveMessage { From = sp, To = pile, CardId = moveId, ToTop = toTop });
                 }
             }
@@ -870,17 +875,22 @@ namespace YGODuelSimulator.Views.Pages
         // Which deck the DeckActions menu was opened over (true = opponent's deck).
         private bool _deckMenuIsOpponent;
 
-        // Right-click a deck pile → the deck menu (Shuffle + surrender), opened at the
-        // cursor and styled like the card menus. Online you can only act on your own deck,
-        // so the opponent's deck offers nothing and the menu doesn't open there.
-        private void Deck_RightClick(object sender, MouseButtonEventArgs e)
+        // Click a deck pile (either button) → the deck menu (View / Shuffle + surrender),
+        // opened at the cursor and styled like the card menus. Left-click routes here too
+        // rather than opening the viewer directly, so looking through the Deck is always a
+        // deliberate, announced action. Online you can only act on your own deck, so the
+        // opponent's deck offers nothing and the menu doesn't open there.
+        private void Deck_LeftClick(object sender, MouseButtonEventArgs e) => OpenDeckMenu(sender, e);
+        private void Deck_RightClick(object sender, MouseButtonEventArgs e) => OpenDeckMenu(sender, e);
+
+        private void OpenDeckMenu(object sender, MouseButtonEventArgs e)
         {
             if ((sender as FrameworkElement)?.Tag is not string tag) return;
             e.Handled = true;
 
             _deckMenuIsOpponent = tag.StartsWith("o:");
             var isOwn = !_deckMenuIsOpponent;
-            // Offline you may shuffle either deck; online only your own.
+            // Offline you may act on either deck; online only your own.
             var canShuffle = isOwn || !_networked;
 
             DeckPlayGroup.Visibility = canShuffle ? Visibility.Visible : Visibility.Collapsed;
@@ -888,6 +898,26 @@ namespace YGODuelSimulator.Views.Pages
 
             if (!canShuffle && !isOwn) return; // the opponent's deck online: nothing to offer
             DeckActions.IsOpen = true;
+        }
+
+        // Look through the Deck. Doing this to your own Deck is a public action in
+        // Yu-Gi-Oh! (only allowed for specific card effects), so it's announced to the
+        // opponent — both players must be aware the Deck was searched.
+        private void ViewDeck_Click(object sender, RoutedEventArgs e)
+        {
+            DeckActions.IsOpen = false;
+            var board = _deckMenuIsOpponent ? _state.Opponent : _state.Player;
+            var who = _deckMenuIsOpponent ? "Opponent" : "Player";
+            PileViewerTitle.Text = $"{who} · Deck";
+            PileViewerItems.ItemsSource = board.Deck;
+            PileViewer.IsOpen = true;
+
+            if (_deckMenuIsOpponent) return; // viewing your own deck is the announced case
+            _state.Announce(_state.Player.DisplayName, "is looking through", "their Deck");
+            PointAt(null); // arm the auto-clear so the banner fades on its own
+            LogAction(_state.Player, "is looking through their Deck");
+            if (_networked)
+                _session?.Send(new AnnounceMessage { Verb = "is looking through", Target = "their Deck", Side = AnnounceSide.None });
         }
 
         private void DeckShuffle_Click(object sender, RoutedEventArgs e)
