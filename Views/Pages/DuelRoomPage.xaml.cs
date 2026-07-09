@@ -1093,8 +1093,19 @@ namespace YGODuelSimulator.Views.Pages
 
         // --- Dice ---
 
-        private void Die_Click(object sender, RoutedEventArgs e) => ResultText.Text = $"Rolled a {_state.RollDie()}.";
-        private void Coin_Click(object sender, RoutedEventArgs e) => ResultText.Text = $"Coin: {(_state.FlipCoin() ? "Heads" : "Tails")}.";
+        private void Die_Click(object sender, RoutedEventArgs e)
+        {
+            var roll = _state.RollDie();
+            DiceResultText.Text = $"Rolled a {roll}";
+            LogAction(_state.Player, $"rolled a {roll}");
+        }
+
+        private void Coin_Click(object sender, RoutedEventArgs e)
+        {
+            var heads = _state.FlipCoin();
+            DiceResultText.Text = heads ? "Coin: Heads" : "Coin: Tails";
+            LogAction(_state.Player, $"flipped {(heads ? "Heads" : "Tails")}");
+        }
 
         // ===== Pre-game overlay: practice vs. online, lobby, deck, RPS, order =====
 
