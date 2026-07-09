@@ -47,6 +47,11 @@ namespace YGODuelSimulator.Views.Pages
         private BoardCard? _attackFrom;
         private readonly DispatcherTimer _attackTimer;
 
+        // Shared per-turn countdown shown on the mat; resets each turn switch. Indicator only.
+        private const int TurnTimerSeconds = 120;
+        private readonly DispatcherTimer _turnTimer;
+        private int _turnSecondsLeft = TurnTimerSeconds;
+
         // An armed "swap control": the monster, waiting for a destination zone click on
         // the other player's side. Null when no swap is pending.
         private BoardCard? _swapCard;
@@ -86,6 +91,14 @@ namespace YGODuelSimulator.Views.Pages
 
             _attackTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.4) };
             _attackTimer.Tick += (_, _) => ClearArrow();
+
+            _turnTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _turnTimer.Tick += (_, _) =>
+            {
+                if (_turnSecondsLeft > 0) _turnSecondsLeft--;
+                UpdateTurnTimerText();
+                if (_turnSecondsLeft == 0) _turnTimer.Stop(); // hold at 0:00 until the next turn
+            };
 
             // In a networked duel my own LP changes (buttons or the text box) mirror
             // to the opponent's view of me. Either player's LP change is also logged.
@@ -1051,6 +1064,7 @@ namespace YGODuelSimulator.Views.Pages
             var ender = _state.ActiveBoard;
             _state.EndTurn();
             _state.Log($"{ender.DisplayName} ended their turn — {_state.TurnSummary}");
+            ResetTurnTimer();
             EmitTurnState();
         }
 
@@ -1063,6 +1077,34 @@ namespace YGODuelSimulator.Views.Pages
                 Phase = (DuelPhaseWire)(int)_state.Phase,
                 ActiveIsSender = _state.ActiveSide == PlayerSide.Player,
             });
+        }
+
+        // --- Turn timer (shared indicator on the mat; resets each turn switch) ---
+
+        // Restarts the per-turn countdown at 3:00 and shows the badge. Called when a duel
+        // begins and on every turn switch (local end-turn and remote turn change).
+        private void ResetTurnTimer()
+        {
+            _turnSecondsLeft = TurnTimerSeconds;
+            UpdateTurnTimerText();
+            TurnTimerBadge.Visibility = Visibility.Visible;
+            _turnTimer.Start();
+        }
+
+        private void StopTurnTimer()
+        {
+            _turnTimer.Stop();
+            TurnTimerBadge.Visibility = Visibility.Collapsed;
+        }
+
+        private void UpdateTurnTimerText()
+        {
+            TurnTimerText.Text = $"{_turnSecondsLeft / 60}:{_turnSecondsLeft % 60:00}";
+            // Warm the colour as time runs low, purely as a visual cue.
+            TurnTimerText.Foreground =
+                _turnSecondsLeft <= 10 ? Brushes.OrangeRed :
+                _turnSecondsLeft <= 30 ? Brushes.Orange :
+                Brushes.White;
         }
 
         // --- Toolbar: decks, draw, shuffle, tokens ---
@@ -1183,6 +1225,7 @@ namespace YGODuelSimulator.Views.Pages
             _state.Log("Offline practice started.");
             Overlay.Visibility = Visibility.Collapsed;
             ResultText.Text = "Offline practice — load a deck to begin.";
+            ResetTurnTimer();
         }
 
         private DuelSession CreateSession()
@@ -1381,6 +1424,7 @@ namespace YGODuelSimulator.Views.Pages
             // Everything's cached and the board is ready — drop the overlay into the duel.
             _loadingDecks = false;
             Overlay.Visibility = Visibility.Collapsed;
+            ResetTurnTimer();
         }
 
         // Fetches and caches the small board thumbnail for every unique card across both
@@ -1439,6 +1483,7 @@ namespace YGODuelSimulator.Views.Pages
             _duelOver = true;
             _localWantsRematch = false;
             _remoteWantsRematch = false;
+            StopTurnTimer();
             // Popups float above the overlay — close any so they don't hover the end screen.
             ViewMenu.IsOpen = CardActions.IsOpen = DeckActions.IsOpen = PileViewer.IsOpen = RevealViewer.IsOpen = false;
             EndResultText.Text = result;
@@ -1507,6 +1552,7 @@ namespace YGODuelSimulator.Views.Pages
 
             if (_playerDeckSource is { } pd) await _state.Player.LoadDeckAsync(pd);
             if (_opponentDeckSource is { } od) await _state.Opponent.LoadDeckAsync(od);
+            ResetTurnTimer();
         }
 
         private void QuitDuel_Click(object sender, RoutedEventArgs e)
@@ -1681,10 +1727,14 @@ namespace YGODuelSimulator.Views.Pages
                     break;
 
                 case TurnStateMessage ts:
+                    // Reset the shared timer only on an actual turn switch, not on the
+                    // opponent's phase-only syncs (which also arrive as TurnStateMessages).
+                    var turnAdvanced = ts.TurnNumber != _state.TurnNumber;
                     _state.TurnNumber = ts.TurnNumber;
                     _state.Phase = (DuelPhase)(int)ts.Phase;
                     _state.ActiveSide = ts.ActiveIsSender ? PlayerSide.Opponent : PlayerSide.Player;
                     _state.Log($"— {_state.TurnSummary} —");
+                    if (turnAdvanced) ResetTurnTimer();
                     break;
 
                 case ChatMessage cm:
@@ -1842,6 +1892,7 @@ namespace YGODuelSimulator.Views.Pages
             _session = null;
             _networked = false;
             _loadingDecks = false;
+            StopTurnTimer();
             _incoming.Clear();
             _revealed.Clear();
             _gameInfo = null;

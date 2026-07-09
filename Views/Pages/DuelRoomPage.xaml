@@ -533,6 +533,22 @@
                         </RadialGradientBrush>
                     </Border.Background>
                     <Grid x:Name="PlaymatArea">
+                    <!-- Shared turn timer, floating on the mat's right edge (Master Duel
+                         style). Counts down 3:00 per turn and resets on each turn switch;
+                         indicator only — nothing happens at 0:00. Fixed size (outside the
+                         Viewbox) so it doesn't scale with the board. -->
+                    <Border x:Name="TurnTimerBadge" Panel.ZIndex="10"
+                            Width="70" Height="70" CornerRadius="35"
+                            HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,2,0"
+                            Background="#CC101820" BorderBrush="#66FFFFFF" BorderThickness="2"
+                            Visibility="Collapsed">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                            <TextBlock Text="TURN" FontSize="9" FontWeight="Bold" Foreground="#99FFFFFF"
+                                       HorizontalAlignment="Center"/>
+                            <TextBlock x:Name="TurnTimerText" Text="3:00" FontSize="19" FontWeight="Bold"
+                                       Foreground="White" HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
                     <Viewbox Stretch="Uniform">
                         <StackPanel>
                             <!-- Opponent half: S/T row (top), then monster row (adjacent to
