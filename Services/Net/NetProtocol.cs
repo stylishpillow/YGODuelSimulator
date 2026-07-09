@@ -69,6 +69,7 @@ public enum AnnounceSide { None, SenderField, ReceiverField }
 [JsonDerivedType(typeof(AttackMessage), "attack")]
 [JsonDerivedType(typeof(ControlSwapMessage), "controlSwap")]
 [JsonDerivedType(typeof(ConcedeMessage), "concede")]
+[JsonDerivedType(typeof(DefeatMessage), "defeat")]
 [JsonDerivedType(typeof(RematchMessage), "rematch")]
 [JsonDerivedType(typeof(LeaveMessage), "leave")]
 public abstract class NetMessage { }
@@ -299,6 +300,14 @@ public sealed class ControlSwapMessage : NetMessage
 public sealed class ConcedeMessage : NetMessage
 {
     public string Verb { get; set; } = "surrendered";
+}
+
+/// <summary>The inverse of a concede: the sender declares that the *receiver* has lost —
+/// used when the receiver's life points ran out and the sender (the winner) ends the duel
+/// on their behalf. <see cref="Verb"/> is the past-tense phrase for the receiver's log.</summary>
+public sealed class DefeatMessage : NetMessage
+{
+    public string Verb { get; set; } = "was defeated";
 }
 
 /// <summary>Sent from the end screen to ask for a rematch. When both peers have sent

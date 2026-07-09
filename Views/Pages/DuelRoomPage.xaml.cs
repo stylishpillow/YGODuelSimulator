@@ -1013,9 +1013,6 @@ namespace YGODuelSimulator.Views.Pages
 
             if (_duelOver) return;
             if (isPlayer ? _playerLpZeroPrompted : _oppLpZeroPrompted) return;
-            // Online I can only end my *own* loss; the opponent concedes on their client
-            // when their own LP hits 0.
-            if (_networked && !isPlayer) return;
 
             if (isPlayer) _playerLpZeroPrompted = true; else _oppLpZeroPrompted = true;
 
@@ -1037,9 +1034,20 @@ namespace YGODuelSimulator.Views.Pages
             LogAction(board, "was defeated (0 LP)");
             if (_networked)
             {
-                // Only reachable when I'm the loser; the opponent sees their win via this.
-                _session?.Send(new ConcedeMessage { Verb = "was defeated" });
-                EndDuel("You lost", $"Your life points reached 0. {winner.DisplayName} wins.");
+                if (isPlayer)
+                {
+                    // My own LP ran out: concede so the opponent sees their win.
+                    _session?.Send(new ConcedeMessage { Verb = "was defeated" });
+                    EndDuel("You lost", $"Your life points reached 0. {winner.DisplayName} wins.");
+                }
+                else
+                {
+                    // The opponent's LP ran out: claim the win and end the duel on their
+                    // client too (their own client may also be prompting them; whichever
+                    // fires first ends both — the later message is ignored via _duelOver).
+                    _session?.Send(new DefeatMessage { Verb = "was defeated" });
+                    EndDuel("You win!", $"{board.DisplayName}'s life points reached 0.");
+                }
             }
             else
             {
@@ -1751,6 +1759,17 @@ namespace YGODuelSimulator.Views.Pages
                         LogAction(o, $"{cc.Verb} — you win!");
                         _iLost = false;
                         EndDuel("You win!", $"{o.DisplayName} {cc.Verb}.");
+                    }
+                    break;
+
+                case DefeatMessage dm:
+                    // The opponent ended the duel because my life points ran out on their
+                    // view. My own client may already have ended it via my LP hitting 0.
+                    if (!_duelOver)
+                    {
+                        LogAction(_state.Player, $"{dm.Verb} (0 LP)");
+                        _iLost = true;
+                        EndDuel("You lost", $"Your life points reached 0. {o.DisplayName} wins.");
                     }
                     break;
 
