@@ -66,10 +66,11 @@ sequence: seed/migrate the DB (`DatabaseSeeder.EnsureSeeded` + `MigrateAsync`),
 `AuthService.EnsureAdminSeededAsync()`, then show `LoginWindow` (modal). Only on a
 successful sign-in does it set `Session.CurrentUser` and open `MainWindow`
 (`ShutdownMode` flips from `OnExplicitShutdown` to `OnMainWindowClose`). Accounts
-live in the `Users` table. On first run `EnsureAdminSeededAsync` creates the `admin`
-account with a **randomly generated** password (never a shipped default) and writes
-it once to `admin-credentials.txt` next to the local data (git-ignored) so the
-machine owner can retrieve it.
+live in the `Users` table. `EnsureAdminSeededAsync` seeds the single `admin` account
+from a baked-in password **hash** (`AdminPasswordHash`) — the plaintext is never in
+the source, so only whoever knows the password can sign in as admin. To rotate it,
+replace the constant with the PBKDF2 hash of a new password (same parameters as
+`HashPassword`).
 - **Password hashing** (`AuthService`): PBKDF2-HMAC-SHA256, stored in a
   self-describing string `pbkdf2-sha256$<iterations>$<salt>$<hash>` so the work
   factor can rise over time; a legacy row (raw hash + `PasswordSalt` column, 100k

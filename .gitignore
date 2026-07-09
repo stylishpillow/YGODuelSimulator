@@ -373,9 +373,6 @@ cards.db-wal
 # Lazily-downloaded card image cache
 images/
 
-# One-time admin credentials written on first run (contains a generated password)
-admin-credentials.txt
-
 # Wrangler local state/cache — contains the Cloudflare account id/email; never commit
 .wrangler/
 
