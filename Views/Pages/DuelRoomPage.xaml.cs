@@ -66,6 +66,7 @@ namespace YGODuelSimulator.Views.Pages
         private Deck? _playerDeckSource;             // last decks loaded offline, reused for a rematch
         private Deck? _opponentDeckSource;
         private bool _duelOver;
+        private bool _loadingDecks;                  // true while pre-caching card images before a duel
         private bool _iLost;                         // did *I* lose the last duel (loser goes first on rematch)
         private bool _localWantsRematch;
         private bool _remoteWantsRematch;
@@ -1254,7 +1255,9 @@ namespace YGODuelSimulator.Views.Pages
                     DisconnectedText.Text = _session.StatusMessage ?? "Disconnected.";
                     break;
                 case MatchPhase.InDuel:
-                    Overlay.Visibility = Visibility.Collapsed;
+                    // While decks are still pre-loading, keep the loading panel up; the
+                    // duel reveals the board itself once caching finishes.
+                    if (!_loadingDecks) Overlay.Visibility = Visibility.Collapsed;
                     break;
             }
         }
@@ -1263,7 +1266,7 @@ namespace YGODuelSimulator.Views.Pages
         {
             Overlay.Visibility = Visibility.Visible;
             foreach (var p in new FrameworkElement[]
-                { EntryPanel, InternetPanel, LobbyPanel, ConnectingPanel, DeckPanel, RpsPanel, OrderPanel, DisconnectedPanel, EndPanel })
+                { EntryPanel, InternetPanel, LobbyPanel, ConnectingPanel, DeckPanel, RpsPanel, OrderPanel, LoadingPanel, DisconnectedPanel, EndPanel })
                 p.Visibility = ReferenceEquals(p, panel) ? Visibility.Visible : Visibility.Collapsed;
         }
 
@@ -1279,7 +1282,10 @@ namespace YGODuelSimulator.Views.Pages
             if (_gameInfo is not { } info) return;
             _networked = true;
             ClearDuelEnd();
-            Overlay.Visibility = Visibility.Collapsed;
+            // Keep the overlay up on a "Loading decks…" panel until every card image
+            // for both players is fetched and cached, so the board never pops in blanks.
+            _loadingDecks = true;
+            ShowOnlyPanel(LoadingPanel);
             EndPanel.Visibility = Visibility.Collapsed;
 
             // Set up the opponent shadow and turn state synchronously first, so any
@@ -1308,11 +1314,67 @@ namespace YGODuelSimulator.Views.Pages
                 ? "You go first."
                 : $"{_session?.OpponentName ?? "Opponent"} goes first.";
 
+            // Pre-fetch (and cache) every card image for both decks while the loading
+            // panel is up, so nothing downloads mid-duel.
+            await PreloadDeckImagesAsync(info);
+
             // Local player is always the bottom ("Player") board; load their real deck.
             var myDeck = new Deck { Name = info.LocalDeck.DeckName };
             myDeck.Main.AddRange(info.LocalDeck.MainIds);
             myDeck.Extra.AddRange(info.LocalDeck.ExtraIds);
             await _state.Player.LoadDeckAsync(myDeck);
+
+            // Everything's cached and the board is ready — drop the overlay into the duel.
+            _loadingDecks = false;
+            Overlay.Visibility = Visibility.Collapsed;
+        }
+
+        // Fetches and caches the small board thumbnail for every unique card across both
+        // players' decks, updating the loading panel's progress as it goes. Best-effort:
+        // a card that can't be fetched just falls back to a card-back at the table.
+        private async Task PreloadDeckImagesAsync(GameStartInfo info)
+        {
+            var ids = new HashSet<long>();
+            foreach (var id in info.LocalDeck.MainIds) ids.Add(id);
+            foreach (var id in info.LocalDeck.ExtraIds) ids.Add(id);
+            foreach (var id in info.RemoteDeck.MainIds) ids.Add(id);
+            foreach (var id in info.RemoteDeck.ExtraIds) ids.Add(id);
+
+            // Resolve each passcode to its image record (one DB round-trip).
+            var idList = ids.ToList();
+            List<CardImage> images;
+            await using (var db = new AppDbContext())
+            {
+                images = await db.Cards
+                    .Where(c => idList.Contains(c.Id))
+                    .SelectMany(c => c.Images)
+                    .ToListAsync();
+            }
+
+            int total = images.Count;
+            int done = 0;
+            void Report() => Dispatcher.Invoke(() =>
+            {
+                LoadingProgress.Maximum = Math.Max(total, 1);
+                LoadingProgress.Value = done;
+                LoadingStatusText.Text = total == 0 ? "No card images to load." : $"{done} / {total} cards";
+            });
+            Report();
+
+            // The image service caps concurrency and rate-limits internally, so we can
+            // safely fan every fetch out at once and let it pace them.
+            var tasks = images.Select(async img =>
+            {
+                var url = string.IsNullOrEmpty(img.ImageUrlSmall) ? img.ImageUrl : img.ImageUrlSmall;
+                if (!string.IsNullOrEmpty(url))
+                {
+                    try { await _images.GetImagePathAsync(img.ApiImageId, url, CardImageSize.Small); }
+                    catch { /* best-effort; a missing image just shows a card-back */ }
+                }
+                Interlocked.Increment(ref done);
+                Report();
+            });
+            await Task.WhenAll(tasks);
         }
 
         // --- End of duel: result screen, rematch, quit ---
@@ -1723,6 +1785,7 @@ namespace YGODuelSimulator.Views.Pages
             _session?.LeaveAndDispose();
             _session = null;
             _networked = false;
+            _loadingDecks = false;
             _incoming.Clear();
             _revealed.Clear();
             _gameInfo = null;

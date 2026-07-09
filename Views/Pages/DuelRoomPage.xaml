@@ -1069,6 +1069,17 @@
                         </StackPanel>
                     </StackPanel>
 
+                    <!-- Loading decks: pre-fetch every card image for both players -->
+                    <StackPanel x:Name="LoadingPanel" Visibility="Collapsed">
+                        <TextBlock Text="Loading decks…" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Fetching card images for both players." Opacity="0.7"
+                                   HorizontalAlignment="Center" Margin="0,4,0,16"/>
+                        <ProgressBar x:Name="LoadingProgress" Height="6" Width="260"
+                                     Minimum="0" Maximum="1" Value="0"/>
+                        <TextBlock x:Name="LoadingStatusText" Opacity="0.7" HorizontalAlignment="Center"
+                                   Margin="0,12,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                    </StackPanel>
+
                     <!-- Disconnected -->
                     <StackPanel x:Name="DisconnectedPanel" Visibility="Collapsed">
                         <TextBlock x:Name="DisconnectedText" FontSize="16" HorizontalAlignment="Center"
