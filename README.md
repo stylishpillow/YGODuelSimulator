@@ -42,6 +42,15 @@ triggers `.github/workflows/release.yml`, which builds a self-contained
 - a `-full.nupkg` update feed so installed apps can auto-update from Releases.
 - `YGODuelSimulator-win-Portable.zip` — a no-install portable build.
 
+**In-app updates are mandatory.** After sign-in, `UpdateService.CheckAsync`
+(`Services/UpdateService.cs`) checks the GitHub Releases feed; if a newer version
+exists, a blocking `UpdateWindow` requires the user to install it (which downloads
+and relaunches the app) before the main shell opens — so everyone converges on the
+latest release, which matters for the networked-duel `ProtocolVersion`. The check
+is skipped for dev (`dotnet run`) builds and when the feed is unreachable, so
+offline users aren't locked out. Settings also shows the current version and a
+manual "Check for updates". Tags must stay in the `vMAJOR.MINOR.PATCH` shape.
+
 To cut a release, bump `<Version>` in `YGODuelSimulator.csproj` if you like, then:
 
 ```

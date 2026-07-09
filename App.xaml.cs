@@ -33,6 +33,17 @@ namespace YGODuelSimulator
             if (login.ShowDialog() == true && login.AuthenticatedUser is { } user)
             {
                 Session.CurrentUser = user;
+
+                // Mandatory update gate: if a newer release exists, the user must install
+                // it before reaching the app. Installing relaunches the process; quitting
+                // (or the offline/dev case, where CheckAsync returns null) falls through.
+                if (await UpdateService.CheckAsync() is { } pending)
+                {
+                    new UpdateWindow(pending.mgr, pending.info).ShowDialog();
+                    Shutdown(); // only reached if the user declined the update
+                    return;
+                }
+
                 var main = new MainWindow();
                 MainWindow = main;
                 ShutdownMode = ShutdownMode.OnMainWindowClose;

@@ -60,5 +60,11 @@
                 </ui:NavigationViewItem>
             </ui:NavigationView.FooterMenuItems>
         </ui:NavigationView>
+
+        <!-- Current app version, tucked into the bottom-right corner. -->
+        <TextBlock Grid.Row="1" x:Name="VersionText"
+                   HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                   Margin="0,0,16,10" Opacity="0.5" FontSize="12"
+                   IsHitTestVisible="False"/>
     </Grid>
 </ui:FluentWindow>
