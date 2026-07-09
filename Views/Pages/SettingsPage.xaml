@@ -19,5 +19,11 @@
             <RadioButton x:Name="ThemeDarkRadio" Content="Dark" GroupName="Theme"
                          Checked="ThemeDarkRadio_Checked" Margin="0,2"/>
         </StackPanel>
+
+        <TextBlock Text="Display" FontSize="16" FontWeight="SemiBold" Margin="0,24,0,8"/>
+        <ui:ToggleSwitch x:Name="FullScreenToggle" Content="Full-screen mode"
+                         Checked="FullScreenToggle_Checked" Unchecked="FullScreenToggle_Unchecked"/>
+        <TextBlock Text="Press F11 to toggle full-screen at any time." Opacity="0.6"
+                   FontSize="12" Margin="0,4,0,0"/>
     </StackPanel>
 </Page>

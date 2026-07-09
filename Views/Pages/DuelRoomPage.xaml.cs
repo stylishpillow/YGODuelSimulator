@@ -1041,8 +1041,27 @@ namespace YGODuelSimulator.Views.Pages
 
         // --- Dice ---
 
-        private void Die_Click(object sender, RoutedEventArgs e) => ResultText.Text = $"Rolled a {_state.RollDie()}.";
-        private void Coin_Click(object sender, RoutedEventArgs e) => ResultText.Text = $"Coin: {(_state.FlipCoin() ? "Heads" : "Tails")}.";
+        private void Die_Click(object sender, RoutedEventArgs e)
+        {
+            int n = _state.RollDie();
+            ResultText.Text = $"Rolled a {n}.";
+            AnnounceRandom($"rolled a {n}");
+        }
+
+        private void Coin_Click(object sender, RoutedEventArgs e)
+        {
+            var face = _state.FlipCoin() ? "Heads" : "Tails";
+            ResultText.Text = $"Coin: {face}.";
+            AnnounceRandom($"flipped {face}");
+        }
+
+        // Records a dice/coin result in my log and, online, sends it so the opponent
+        // sees it in theirs too (both players share the same outcome).
+        private void AnnounceRandom(string result)
+        {
+            LogAction(_state.Player, result);
+            if (_networked) _session?.Send(new DiceRollMessage { Result = result });
+        }
 
         // ===== Pre-game overlay: practice vs. online, lobby, deck, RPS, order =====
 
@@ -1484,6 +1503,10 @@ namespace YGODuelSimulator.Views.Pages
 
                 case ChatMessage cm:
                     _state.LogChat(o.DisplayName, cm.Text, DuelLogSide.Opponent);
+                    break;
+
+                case DiceRollMessage dr:
+                    LogAction(o, dr.Result);
                     break;
 
                 case ConcedeMessage cc:

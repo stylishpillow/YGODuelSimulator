@@ -33,9 +33,16 @@ namespace YGODuelSimulator
             if (login.ShowDialog() == true && login.AuthenticatedUser is { } user)
             {
                 Session.CurrentUser = user;
+
+                // Building the Fluent (Mica) shell and rendering its first frame stalls
+                // the UI thread for a beat; cover it with a splash that animates on its
+                // own thread, then hand off once the shell has actually rendered.
+                var splash = LoadingWindow.ShowOnBackgroundThread();
+
                 var main = new MainWindow();
                 MainWindow = main;
                 ShutdownMode = ShutdownMode.OnMainWindowClose;
+                main.ContentRendered += (_, _) => splash.Dismiss();
                 main.Show();
             }
             else

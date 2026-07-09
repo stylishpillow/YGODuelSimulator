@@ -10,6 +10,7 @@
         WindowBackdropType="Mica"
         WindowCornerPreference="Round"
         Icon="pack://application:,,,/Assets/app-icon.png"
+        PreviewKeyDown="Window_PreviewKeyDown"
         Title="YGO Duel Simulator" Height="640" Width="1000">
     <Grid>
         <Grid.RowDefinitions>
@@ -17,7 +18,7 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="YGO Duel Simulator"/>
+        <ui:TitleBar x:Name="AppTitleBar" Grid.Row="0" Title="YGO Duel Simulator"/>
 
         <ui:NavigationView Grid.Row="1" x:Name="RootNavigation" PaneDisplayMode="Left">
             <ui:NavigationView.MenuItems>

@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using YGODuelSimulator.Services;
 using YGODuelSimulator.Views.Pages;
 
@@ -30,6 +31,60 @@ namespace YGODuelSimulator.Views
             Loaded += (_, _) => RootNavigation.Navigate(typeof(HomePage));
         }
 
+        // --- Full-screen mode ---
+
+        private WindowState _preFullScreenState;
+        private WindowStyle _preFullScreenStyle;
+        private ResizeMode _preFullScreenResize;
+
+        /// <summary>Whether the shell is currently borderless full-screen.</summary>
+        public bool IsFullScreen { get; private set; }
+
+        /// <summary>Enters or leaves borderless full-screen (hides the title bar and
+        /// window chrome, covering the whole screen including the taskbar).</summary>
+        public void SetFullScreen(bool on)
+        {
+            if (on == IsFullScreen) return;
+
+            if (on)
+            {
+                _preFullScreenState = WindowState;
+                _preFullScreenStyle = WindowStyle;
+                _preFullScreenResize = ResizeMode;
+
+                AppTitleBar.Visibility = Visibility.Collapsed;
+                WindowStyle = WindowStyle.None;
+                ResizeMode = ResizeMode.NoResize;
+                // Toggle through Normal first so a re-maximize takes effect and the
+                // borderless window covers the taskbar.
+                if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
+                WindowState = WindowState.Maximized;
+            }
+            else
+            {
+                AppTitleBar.Visibility = Visibility.Visible;
+                WindowStyle = _preFullScreenStyle;
+                ResizeMode = _preFullScreenResize;
+                WindowState = _preFullScreenState;
+            }
+
+            IsFullScreen = on;
+        }
+
+        /// <summary>Flips between full-screen and windowed.</summary>
+        public void ToggleFullScreen() => SetFullScreen(!IsFullScreen);
+
+        // F11 toggles full-screen both ways. (Escape is deliberately left alone — the
+        // Duel Room uses it to cancel attacks/placement.)
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.F11)
+            {
+                ToggleFullScreen();
+                e.Handled = true;
+            }
+        }
+
         /// <summary>Navigates the rail to a page type. Used by the Home dashboard tiles.</summary>
         public void NavigateTo(Type pageType)
         {
@@ -48,10 +103,13 @@ namespace YGODuelSimulator.Views
             if (login.ShowDialog() == true && login.AuthenticatedUser is { } user)
             {
                 Session.CurrentUser = user;
+
+                var splash = LoadingWindow.ShowOnBackgroundThread();
                 var main = new MainWindow();
                 // Re-home the app on the new shell first so closing this window (no
                 // longer the MainWindow) doesn't trigger shutdown.
                 Application.Current.MainWindow = main;
+                main.ContentRendered += (_, _) => splash.Dismiss();
                 main.Show();
                 Close();
             }

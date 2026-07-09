@@ -20,7 +20,20 @@ namespace YGODuelSimulator.Views.Pages
             else
                 ThemeLightRadio.IsChecked = true;
 
+            // Mirror the shell's current full-screen state.
+            FullScreenToggle.IsChecked = (Application.Current.MainWindow as MainWindow)?.IsFullScreen ?? false;
+
             _initialized = true;
+        }
+
+        private void FullScreenToggle_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_initialized) (Application.Current.MainWindow as MainWindow)?.SetFullScreen(true);
+        }
+
+        private void FullScreenToggle_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (_initialized) (Application.Current.MainWindow as MainWindow)?.SetFullScreen(false);
         }
 
         private void ThemeSystemRadio_Checked(object sender, RoutedEventArgs e)

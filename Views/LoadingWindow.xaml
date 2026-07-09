@@ -1,0 +1,39 @@
+<Window x:Class="YGODuelSimulator.Views.LoadingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Height="230" Width="460">
+    <!-- A plain Window (not FluentWindow) styled inline: it lives on its own
+         dispatcher thread so it keeps animating while the main UI thread builds the
+         shell, and inline brushes avoid cross-thread theme-resource lookups. -->
+    <Border CornerRadius="12" Background="#FF1E1722"
+            BorderBrush="#33FFFFFF" BorderThickness="1">
+        <Grid Margin="36,30">
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="YGO DUEL SIMULATOR"
+                           Foreground="#FFF3EAF6" FontSize="19" FontWeight="Bold"
+                           HorizontalAlignment="Center"/>
+                <TextBlock Text="Loading…"
+                           Foreground="#66FFFFFF" FontSize="11"
+                           HorizontalAlignment="Center" Margin="0,2,0,0"/>
+
+                <TextBlock x:Name="MessageText"
+                           Text="Shuffling the Deck of the Gods…"
+                           Foreground="#DDFFFFFF" FontSize="14"
+                           TextAlignment="Center" TextWrapping="Wrap"
+                           MinHeight="38" Margin="0,18,0,0"
+                           VerticalAlignment="Center"/>
+
+                <ProgressBar IsIndeterminate="True" Height="6" Margin="0,16,0,0"
+                             Background="#22FFFFFF" Foreground="#FFE0559A"
+                             BorderThickness="0"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

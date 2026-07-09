@@ -63,6 +63,7 @@ public enum AnnounceSide { None, SenderField, ReceiverField }
 [JsonDerivedType(typeof(RevealCardsMessage), "revealCards")]
 [JsonDerivedType(typeof(TurnStateMessage), "turnState")]
 [JsonDerivedType(typeof(ChatMessage), "chat")]
+[JsonDerivedType(typeof(DiceRollMessage), "dice")]
 [JsonDerivedType(typeof(EmoteMessage), "emote")]
 [JsonDerivedType(typeof(AttackMessage), "attack")]
 [JsonDerivedType(typeof(ControlSwapMessage), "controlSwap")]
@@ -228,6 +229,14 @@ public sealed class TurnStateMessage : NetMessage
 public sealed class ChatMessage : NetMessage
 {
     public string Text { get; set; } = "";
+}
+
+/// <summary>A dice roll or coin flip the sender made, shown in both players' logs.
+/// <see cref="Result"/> is the finished verb phrase, e.g. "rolled a 4" or
+/// "flipped Heads".</summary>
+public sealed class DiceRollMessage : NetMessage
+{
+    public string Result { get; set; } = "";
 }
 
 /// <summary>A status emote shown on the sender's portrait ("thinking", "ok",
